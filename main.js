@@ -185,16 +185,18 @@
     if (!value || typeof value !== "string") return false;
     try {
       var u = new URL(value);
-      return (u.protocol === "http:" || u.protocol === "https:") && !!u.hostname;
+      return (u.protocol === "http:" || u.protocol === "https:") && !!u.hostname && !u.username && !u.password;
     } catch (err) {
       return false;
     }
   }
   function readDemoProfile() {
-    return readStorageJson(AUTH_PROFILE_KEY, {});
+    var profile = readStorageJson(AUTH_PROFILE_KEY, {});
+    return profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
   }
   function writeDemoProfile(profile) {
-    return writeStorageJson(AUTH_PROFILE_KEY, profile || {});
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) return false;
+    return writeStorageJson(AUTH_PROFILE_KEY, profile);
   }
   function clearDemoProfile() {
     removeStorageJson(AUTH_PROFILE_KEY);
@@ -215,7 +217,10 @@
     });
     authSigninForm && authSigninForm.classList.toggle("is-visible", target === "signin");
     authSignupForm && authSignupForm.classList.toggle("is-visible", target === "signup");
-    authOnboardingPanel && (authOnboardingPanel.hidden = target !== "onboarding");
+    if (authOnboardingPanel) {
+      authOnboardingPanel.hidden = target !== "onboarding";
+      authOnboardingPanel.classList.toggle("is-visible", target === "onboarding");
+    }
     if (target === "signin") {
       var emailField = document.getElementById("signin-email");
       if (emailField) emailField.focus();
@@ -225,13 +230,22 @@
       if (signupName) signupName.focus();
     }
     if (target === "onboarding") {
+      onboardingStep = 1;
+      seedOnboardingData(readDemoProfile());
+      if (authOnboardingPanel) authOnboardingPanel.classList.remove("is-complete");
+      onboardingNext.hidden = false;
+      onboardingBack.hidden = false;
+      if (onboardingExit) onboardingExit.textContent = "Exit setup";
       if (onboardingNext) onboardingNext.textContent = "Continue";
       renderOnboardingStep();
     }
   }
   function closeAuth() {
     if (authShell) authShell.hidden = true;
-    if (authOnboardingPanel) authOnboardingPanel.hidden = true;
+    if (authOnboardingPanel) {
+      authOnboardingPanel.hidden = true;
+      authOnboardingPanel.classList.remove("is-visible");
+    }
     setAuthStatus(authStatus, "");
     setAuthStatus(signupStatus, "");
     setAuthStatus(onboardingStatus, "");
@@ -320,13 +334,15 @@
     var email = document.getElementById("signup-email").value.trim();
     var role = document.getElementById("signup-role").value;
     var profile = readDemoProfile();
-    profile = profile && typeof profile === "object" ? profile : {};
     profile.fullName = name;
     profile.email = email;
     profile.role = role;
     profile.createdAt = new Date().toISOString();
     profile.passwordStored = false;
-    writeDemoProfile(profile);
+    if (!writeDemoProfile(profile)) {
+      setAuthStatus(signupStatus, "Could not save demo profile data in this browser. Check local storage settings and try again.");
+      return;
+    }
     persistDemoSession(email, name);
     setAuthStatus(signupStatus, "Demo account created in this browser only. No real authentication service was used.");
     openAuth("onboarding");
@@ -378,7 +394,7 @@
     if (skillList) {
       skillList.innerHTML = "";
       (Array.isArray(data.skills) ? data.skills : []).forEach(function (skill) {
-        addSkill(skill);
+        addSkill(skill && typeof skill === "object" ? skill.name || skill.skill : skill);
       });
     }
     if (onboardingSummary) renderOnboardingSummary();
@@ -391,14 +407,6 @@
       var education = document.getElementById("onboarding-education").value;
       if (!fullName) { errors["onboarding-name"] = "Please enter your full name."; allClear = false; }
       if (!education) { errors["onboarding-education"] = "Please select your education level."; allClear = false; }
-    }
-    if (step === 2) {
-      var roles = document.getElementById("onboarding-role-target").value.trim();
-      var type = document.getElementById("onboarding-opportunity-type").value;
-      var mode = document.getElementById("onboarding-work-mode").value;
-      if (!roles) { errors["onboarding-role-target"] = "Please enter a role or job title."; allClear = false; }
-      if (!type) { errors["onboarding-opportunity-type"] = "Please select a preferred opportunity type."; allClear = false; }
-      if (!mode) { errors["onboarding-work-mode"] = "Please select a preferred work mode."; allClear = false; }
     }
     if (step === 3) {
       if (!readSkillList().length) { errors["onboarding-skill"] = "Add at least one skill to continue."; allClear = false; }
@@ -416,9 +424,8 @@
     setAuthStatus(onboardingStatus, allClear ? "" : "Please correct the highlighted fields before continuing.");
     return allClear;
   }
-  function saveProfileSnapshot() {
+  function collectProfileSnapshot() {
     var profile = readDemoProfile();
-    profile = profile && typeof profile === "object" ? profile : {};
     profile.fullName = document.getElementById("onboarding-name").value.trim() || profile.fullName || "";
     profile.headline = document.getElementById("onboarding-headline").value.trim();
     profile.educationLevel = document.getElementById("onboarding-education").value;
@@ -428,17 +435,27 @@
     profile.opportunityType = document.getElementById("onboarding-opportunity-type").value;
     profile.workMode = document.getElementById("onboarding-work-mode").value;
     profile.preferredLocations = document.getElementById("onboarding-location").value.trim();
-    profile.skills = readSkillList();
+    var existingSkills = normalizeStudentProfile(profile).skills;
+    profile.skills = readSkillList().map(function (name) {
+      var existing = existingSkills.find(function (skill) { return skill.name.toLowerCase() === name.toLowerCase(); });
+      return existing || {
+        id: "skill_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        name: name,
+        level: "",
+        evidence: "self-declared",
+        projectId: "",
+        linkedProject: ""
+      };
+    });
     profile.careerInterests = document.getElementById("onboarding-interests").value.trim();
     profile.githubUrl = document.getElementById("onboarding-github").value.trim();
     profile.portfolioUrl = document.getElementById("onboarding-portfolio").value.trim();
     profile.updatedAt = new Date().toISOString();
-    writeDemoProfile(profile);
     return profile;
   }
   function renderOnboardingSummary() {
     if (!onboardingSummary) return;
-    var profile = saveProfileSnapshot();
+    var profile = collectProfileSnapshot();
     var dl = document.createElement("dl");
     var pairs = [
       ["Full name", profile.fullName || "Not provided"],
@@ -450,7 +467,9 @@
       ["Opportunity type", profile.opportunityType || "Not provided"],
       ["Work mode", profile.workMode || "Not provided"],
       ["Locations", profile.preferredLocations || "Not provided"],
-      ["Skills", profile.skills && profile.skills.length ? profile.skills.join(", ") : "Not provided"],
+      ["Skills", profile.skills && profile.skills.length ? profile.skills.map(function (skill) {
+        return skill && typeof skill === "object" ? skill.name || skill.skill || "" : skill;
+      }).filter(Boolean).join(", ") : "Not provided"],
       ["Career interests", profile.careerInterests || "Not provided"],
       ["GitHub", profile.githubUrl || "Not provided"],
       ["Portfolio", profile.portfolioUrl || "Not provided"]
@@ -489,37 +508,23 @@
     }
   }
   function finishOnboarding() {
-    var saved = saveProfileSnapshot();
-    if (!saved.fullName || !saved.educationLevel || !saved.desiredRoles || !saved.opportunityType || !saved.workMode || !(saved.skills && saved.skills.length)) {
+    var saved = collectProfileSnapshot();
+    if (!saved.fullName || !saved.educationLevel || !(saved.skills && saved.skills.length)) {
       setAuthStatus(onboardingStatus, "Please complete the required fields before finishing setup.");
       return;
     }
-    setAuthStatus(onboardingStatus, "Demo profile saved locally in this browser only. No real account or backend was created.");
+    if (!writeDemoProfile(saved)) {
+      setAuthStatus(onboardingStatus, "Could not save your profile in this browser. Check local storage settings and try again.");
+      return;
+    }
     if (studentShell) {
       showStudentRoute("dashboard");
       loadStudentProfileIntoForm();
       renderStudentDashboard();
+      if (studentDashboardStatus) studentDashboardStatus.textContent = "Demo profile saved in this browser only.";
+      studentShell.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
     }
-    if (authOnboardingPanel) {
-      authOnboardingPanel.classList.add("is-complete");
-      var finishCard = document.createElement("div");
-      finishCard.className = "summary-card";
-      finishCard.innerHTML = "<p><strong>You're set.</strong> Your demo student profile has been saved in this browser only.</p>";
-      onboardingSummary.textContent = "";
-      onboardingSummary.appendChild(finishCard);
-      var buttonWrap = document.createElement("div");
-      buttonWrap.className = "auth-form__actions";
-      var continueExplore = document.createElement("button");
-      continueExplore.type = "button"; continueExplore.className = "btn btn--primary btn--block"; continueExplore.textContent = "Explore opportunities";
-      continueExplore.addEventListener("click", function () { closeAuth(); document.getElementById("opportunities").scrollIntoView({ behavior: "smooth", block: "start" }); });
-      buttonWrap.appendChild(continueExplore);
-      onboardingSummary.appendChild(buttonWrap);
-      onboardingStepEls.forEach(function (el) { el.classList.remove("is-visible"); });
-      onboardingNext.hidden = true;
-      onboardingBack.hidden = true;
-      if (onboardingExit) onboardingExit.textContent = "Return to opportunities";
-      if (onboardingStepLabel) onboardingStepLabel.textContent = "Setup complete";
-    }
+    closeAuth();
   }
 
   document.addEventListener("click", function (e) {
@@ -608,7 +613,6 @@
     }
   });
   document.getElementById("onboarding-next").addEventListener("click", function () {
-    var profile = saveProfileSnapshot();
     if (onboardingStep === 4) {
       finishOnboarding();
       return;
@@ -633,10 +637,6 @@
   if (authSigninForm) authSigninForm.classList.add("is-visible");
   if (authSignupForm) authSignupForm.classList.remove("is-visible");
   if (authShell) authShell.hidden = true;
-  if (window.NEXORA_DEMO && window.NEXORA_DEMO.profile) {
-    seedOnboardingData(window.NEXORA_DEMO.profile);
-  }
-
   /* ---------- Student dashboard and profile foundation ---------- */
   var studentShell = document.getElementById("student-shell");
   var recruiterShell = document.getElementById("recruiter-shell");
@@ -647,19 +647,107 @@
   var studentWelcomeName = document.getElementById("student-welcome-name");
   var studentCompletionBar = document.getElementById("student-completion-bar");
   var studentCompletionValue = document.getElementById("student-completion-value");
+  var studentCompletionDetail = document.getElementById("student-completion-detail");
+  var studentDashboardStatus = document.getElementById("student-dashboard-status");
   var studentSavedJobs = document.getElementById("student-saved-jobs");
   var studentApplications = document.getElementById("student-applications");
+  var studentApplicationsView = document.getElementById("student-applications-view");
+  var studentApplicationForm = document.getElementById("student-application-form");
+  var studentApplicationList = document.getElementById("student-application-list");
+  var studentApplicationMessage = document.getElementById("student-application-message");
+  var studentApplicationListMessage = document.getElementById("student-application-list-message");
+  var studentApplicationDuplicateEdit = document.getElementById("student-application-duplicate-edit");
+  var studentApplicationDraftId = null;
+  var studentApplicationStatuses = ["Applied", "Viewed", "In Review", "Shortlisted", "Rejected", "Closed"];
   var studentOverview = document.getElementById("student-profile-overview");
   var studentSkillDraftId = null;
   var studentProjectDraftId = null;
+  var activeDefenseSessionId = "";
+
+  function normalizeDefenseSessions(sessions) {
+    if (!Array.isArray(sessions)) return [];
+    return sessions.map(function (session, index) {
+      var item = session && typeof session === "object" && !Array.isArray(session) ? session : {};
+      var savedProject = item.project && typeof item.project === "object" ? item.project : {};
+      var questions = Array.isArray(item.questions) ? item.questions.slice(0, 6).map(function (question, questionIndex) {
+        var prompt = question && typeof question === "object" ? question : {};
+        return {
+          category: String(prompt.category || "Project explanation").slice(0, 60),
+          text: String(prompt.text || "").slice(0, 700),
+          answer: String(prompt.answer || "").slice(0, 3000)
+        };
+      }).filter(function (question) { return !!question.text; }) : [];
+      var status = item.status === "completed" && questions.length === 6 ? "completed" : "in-progress";
+      var result = item.result && typeof item.result === "object" ? item.result : {};
+      var normalizedSession = {
+        id: String(item.id || "defense_legacy_" + index),
+        projectId: String(item.projectId || savedProject.id || ""),
+        project: {
+          id: String(savedProject.id || item.projectId || ""),
+          title: String(savedProject.title || "").slice(0, 160),
+          description: String(savedProject.description || "").slice(0, 2000),
+          technologies: String(savedProject.technologies || "").slice(0, 500),
+          role: String(savedProject.role || "").slice(0, 500),
+          githubUrl: String(savedProject.githubUrl || "").slice(0, 500),
+          liveDemoUrl: String(savedProject.liveDemoUrl || "").slice(0, 500)
+        },
+        questions: questions,
+        currentIndex: Math.max(0, Math.min(Number(item.currentIndex) || 0, questions.length)),
+        status: status,
+        startedAt: String(item.startedAt || "").slice(0, 40),
+        completedAt: status === "completed" ? String(item.completedAt || "").slice(0, 40) : "",
+        shareWithRecruiters: status === "completed" && item.shareWithRecruiters === true,
+        result: {
+          strengths: Array.isArray(result.strengths) ? result.strengths.map(String).slice(0, 6) : [],
+          unanswered: Array.isArray(result.unanswered) ? result.unanswered.map(String).slice(0, 6) : [],
+          reviewTopics: Array.isArray(result.reviewTopics) ? result.reviewTopics.map(String).slice(0, 6) : [],
+          answeredCount: Math.max(0, Math.min(Number(result.answeredCount) || 0, 6))
+        }
+      };
+      if (status === "completed") normalizedSession.result = summarizeDefenseSession(normalizedSession);
+      return normalizedSession;
+    }).filter(function (session) { return session.questions.length > 0; }).slice(-30);
+  }
+
+  function normalizeSkillGapAnalysis(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    var steps = Array.isArray(value.steps) ? value.steps.map(function (step, index) {
+      var item = step && typeof step === "object" && !Array.isArray(step) ? step : {};
+      return {
+        id: String(item.id || "roadmap_" + index).slice(0, 100),
+        skill: String(item.skill || "").trim().slice(0, 100),
+        why: String(item.why || "").trim().slice(0, 240),
+        exercise: String(item.exercise || "").trim().slice(0, 400),
+        projectId: String(item.projectId || "").trim().slice(0, 100),
+        completed: item.completed === true
+      };
+    }).filter(function (step) { return !!(step.skill && step.why && step.exercise); }).slice(0, 30) : [];
+    var requirements = Array.isArray(value.requiredSkills) ? value.requiredSkills.map(function (skill) {
+      return String(skill || "").trim().slice(0, 100);
+    }).filter(Boolean).slice(0, 40) : [];
+    var additionalRequirements = Array.isArray(value.additionalRequirements) ? value.additionalRequirements.map(function (item) {
+      return String(item || "").trim().slice(0, 300);
+    }).filter(Boolean).slice(0, 20) : [];
+    if (["role", "job"].indexOf(value.mode) < 0) return null;
+    return {
+      mode: value.mode,
+      role: String(value.role || "").trim().slice(0, 100),
+      jobId: String(value.jobId || "").slice(0, 100),
+      jobTitle: String(value.jobTitle || "").trim().slice(0, 160),
+      requiredSkills: requirements,
+      additionalRequirements: additionalRequirements,
+      analyzedAt: String(value.analyzedAt || "").slice(0, 40),
+      steps: steps
+    };
+  }
 
   function normalizeStudentProfile(profile) {
-    var source = profile && typeof profile === "object" ? profile : {};
-    var skills = Array.isArray(source.skills) ? source.skills.map(function (skill) {
-      var item = skill && typeof skill === "object" ? skill : {};
-      var name = String(item.name || item.skill || "").trim();
+    var source = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
+    var skills = Array.isArray(source.skills) ? source.skills.map(function (skill, index) {
+      var item = skill && typeof skill === "object" && !Array.isArray(skill) ? skill : {};
+      var name = String(typeof skill === "string" ? skill : item.name || item.skill || "").trim();
       return {
-        id: String(item.id || "skill_" + Math.random().toString(16).slice(2)),
+        id: String(item.id || "skill_legacy_" + index),
         name: name,
         level: String(item.level || "").trim(),
         evidence: item.evidence === "project-linked" ? "project-linked" : "self-declared",
@@ -668,10 +756,10 @@
       };
     }).filter(function (skill) { return !!skill.name; }) : [];
 
-    var projects = Array.isArray(source.projects) ? source.projects.map(function (project) {
-      var item = project && typeof project === "object" ? project : {};
+    var projects = Array.isArray(source.projects) ? source.projects.map(function (project, index) {
+      var item = project && typeof project === "object" && !Array.isArray(project) ? project : {};
       return {
-        id: String(item.id || "project_" + Math.random().toString(16).slice(2)),
+        id: String(item.id || "project_legacy_" + index),
         title: String(item.title || "").trim(),
         description: String(item.description || "").trim(),
         technologies: String(item.technologies || "").trim(),
@@ -681,7 +769,32 @@
       };
     }).filter(function (project) { return !!project.title; }) : [];
 
+    var applications = Array.isArray(source.applications) ? source.applications.map(function (application, index) {
+      var item = application && typeof application === "object" && !Array.isArray(application) ? application : {};
+      var status = String(item.status || "").trim();
+      return {
+        id: String(item.id || "application_legacy_" + index),
+        jobId: item.jobId === null || item.jobId === undefined ? "" : String(item.jobId).trim(),
+        recruiterListingId: String(item.recruiterListingId || "").trim(),
+        candidateId: String(item.candidateId || source.profileId || "").trim(),
+        jobTitle: String(item.jobTitle || "").trim(),
+        companyName: String(item.companyName || "").trim(),
+        applicationDate: String(item.applicationDate || "").trim(),
+        methodSource: String(item.methodSource || "").trim(),
+        status: status,
+        recruiterStatus: studentApplicationStatuses.indexOf(String(item.recruiterStatus || "")) !== -1 ? String(item.recruiterStatus) : "",
+        recruiterUpdatedAt: String(item.recruiterUpdatedAt || "").trim(),
+        notes: String(item.notes || "").trim(),
+        createdAt: String(item.createdAt || "").trim(),
+        updatedAt: String(item.updatedAt || "").trim(),
+        statusSource: "student"
+      };
+    }).filter(function (application) {
+      return !!(application.jobTitle && application.companyName && studentApplicationStatuses.indexOf(application.status) !== -1);
+    }) : [];
+
     return {
+      profileId: String(source.profileId || "").trim(),
       fullName: String(source.fullName || "").trim(),
       headline: String(source.headline || "").trim(),
       educationLevel: String(source.educationLevel || "").trim(),
@@ -693,6 +806,9 @@
       preferredLocations: String(source.preferredLocations || "").trim(),
       skills: skills,
       projects: projects,
+      applications: applications,
+      defenseSessions: normalizeDefenseSessions(source.defenseSessions),
+      skillGapAnalysis: normalizeSkillGapAnalysis(source.skillGapAnalysis),
       careerInterests: String(source.careerInterests || "").trim(),
       githubUrl: String(source.githubUrl || "").trim(),
       portfolioUrl: String(source.portfolioUrl || "").trim(),
@@ -704,7 +820,7 @@
 
   function studentProfileHasData(profile) {
     var p = normalizeStudentProfile(profile);
-    return !!(p.fullName || p.headline || p.educationLevel || p.collegeName || p.graduationYear || p.desiredRoles || p.opportunityType || p.workMode || p.preferredLocations || p.skills.length || p.projects.length || p.careerInterests || p.githubUrl || p.portfolioUrl || p.email || p.role);
+    return !!(p.fullName || p.headline || p.educationLevel || p.collegeName || p.graduationYear || p.desiredRoles || p.opportunityType || p.workMode || p.preferredLocations || p.skills.length || p.projects.length || p.applications.length || p.skillGapAnalysis || p.careerInterests || p.githubUrl || p.portfolioUrl || p.email || p.role);
   }
 
   function setStudentStatus(message) {
@@ -716,7 +832,9 @@
     if (recruiterShell) recruiterShell.hidden = true;
     var viewMap = {
       dashboard: document.getElementById("student-dashboard-view"),
-      profile: document.getElementById("student-profile-view")
+      profile: document.getElementById("student-profile-view"),
+      applications: studentApplicationsView,
+      defense: document.getElementById("student-defense-view")
     };
     studentViews.forEach(function (view) {
       if (!view) return;
@@ -730,16 +848,12 @@
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
     });
-    studentShell.hidden = !(route === "dashboard" || route === "profile");
+    studentShell.hidden = !(route === "dashboard" || route === "profile" || route === "applications" || route === "defense");
   }
 
   function studentFieldErrorMap(profileData) {
     var errors = {};
     if (!profileData.fullName) errors["student-profile-name"] = "Please enter your full name.";
-    if (!profileData.educationLevel) errors["student-profile-education"] = "Please select your education level.";
-    if (!profileData.desiredRoles) errors["student-profile-role"] = "Please enter a role or job title.";
-    if (!profileData.opportunityType) errors["student-profile-opportunity"] = "Please select a preferred opportunity type.";
-    if (!profileData.workMode) errors["student-profile-workmode"] = "Please select a preferred work mode.";
     if (profileData.githubUrl && !isHttpUrl(profileData.githubUrl)) errors["student-profile-github"] = "Use a valid http(s) URL.";
     if (profileData.portfolioUrl && !isHttpUrl(profileData.portfolioUrl)) errors["student-profile-portfolio"] = "Use a valid http(s) URL.";
     return errors;
@@ -793,13 +907,24 @@
     var skillLevel = document.getElementById("student-skill-level");
     var skillProject = document.getElementById("student-skill-project");
     if (skillName) skillName.value = "";
-    if (skillLevel) skillLevel.value = "";
+    if (skillLevel) {
+      skillLevel.value = "";
+      var savedLevelOption = skillLevel.querySelector("[data-saved-level]");
+      if (savedLevelOption) savedLevelOption.remove();
+    }
     if (skillProject) skillProject.value = "";
     studentSkillDraftId = null;
     var addButton = document.getElementById("student-skill-add");
     if (addButton) addButton.textContent = "Add skill";
-    setFieldError("student-skill-name", "");
-    setFieldError("student-skill-error", "");
+    setStudentSkillMessage("");
+    if (skillName) skillName.setAttribute("aria-invalid", "false");
+  }
+
+  function setStudentSkillMessage(message, isError) {
+    var messageEl = document.getElementById("student-skill-error");
+    var skillName = document.getElementById("student-skill-name");
+    if (messageEl) messageEl.textContent = message || "";
+    if (skillName) skillName.setAttribute("aria-invalid", isError ? "true" : "false");
   }
 
   function clearStudentProjectForm() {
@@ -811,7 +936,18 @@
     studentProjectDraftId = null;
     var saveButton = document.getElementById("student-project-save");
     if (saveButton) saveButton.textContent = "Add project";
-    setFieldError("student-project-error", "");
+    var clearButton = document.getElementById("student-project-clear");
+    if (clearButton) clearButton.textContent = "Clear";
+    setStudentProjectMessage("");
+  }
+
+  function setStudentProjectMessage(message, isError) {
+    var messageEl = document.getElementById("student-project-error");
+    if (messageEl) {
+      messageEl.textContent = message || "";
+      messageEl.classList.toggle("field-error", !!(message && isError));
+      messageEl.classList.toggle("auth-status", !(message && isError));
+    }
   }
 
   function renderStudentSkillEditor() {
@@ -830,12 +966,12 @@
       return '<li class="student-skill-item">' +
         '<div class="student-skill-item__meta">' +
           '<strong>' + escapeHtml(skill.name) + '</strong>' +
-          levelText +
+          (skill.level ? levelText : "") +
           '<span class="student-evidence">Evidence: ' + escapeHtml(evidence) + linkedProject + '</span>' +
         '</div>' +
         '<div class="student-skill-item__actions">' +
-          '<button class="btn btn--text" type="button" data-student-skill-edit="' + skill.id + '">Edit</button>' +
-          '<button class="btn btn--text" type="button" data-student-skill-delete="' + skill.id + '">Remove</button>' +
+          '<button class="btn btn--text" type="button" data-student-skill-edit="' + escapeHtml(skill.id) + '" aria-label="Edit skill ' + escapeHtml(skill.name) + '">Edit</button>' +
+          '<button class="btn btn--text" type="button" data-student-skill-delete="' + escapeHtml(skill.id) + '" aria-label="Remove skill ' + escapeHtml(skill.name) + '">Remove</button>' +
         '</div>' +
       '</li>';
     }).join("");
@@ -853,36 +989,804 @@
     list.innerHTML = profile.projects.map(function (project) {
       var technologies = project.technologies ? '<span class="student-evidence">Technologies: ' + escapeHtml(project.technologies) + '</span>' : '<span class="student-evidence">Technologies: Not provided</span>';
       var roleText = project.role ? '<span class="student-evidence">Role: ' + escapeHtml(project.role) + '</span>' : '<span class="student-evidence">Role: Not provided</span>';
+      var hasDefense = profile.defenseSessions.some(function (session) { return session.projectId === project.id && session.status === "completed"; });
+      var readyForDefense = !!(project.description && project.technologies && project.role);
       var links = [];
-      if (project.githubUrl) links.push('<a class="link" href="' + escapeHtml(project.githubUrl) + '" target="_blank" rel="noopener noreferrer">GitHub</a>');
-      if (project.liveDemoUrl) links.push('<a class="link" href="' + escapeHtml(project.liveDemoUrl) + '" target="_blank" rel="noopener noreferrer">Live demo</a>');
+      if (project.githubUrl && isHttpUrl(project.githubUrl)) links.push('<a class="link" href="' + escapeHtml(project.githubUrl) + '" target="_blank" rel="noopener noreferrer">Repository link provided</a>');
+      if (project.liveDemoUrl && isHttpUrl(project.liveDemoUrl)) links.push('<a class="link" href="' + escapeHtml(project.liveDemoUrl) + '" target="_blank" rel="noopener noreferrer">Live demo</a>');
       return '<li class="student-project-item">' +
         '<div class="student-project-item__meta">' +
           '<strong>' + escapeHtml(project.title) + '</strong>' +
           '<span class="student-evidence">' + escapeHtml(project.description || "No description provided") + '</span>' +
           technologies +
           roleText +
+          '<span class="student-evidence">Project added by student</span>' +
+          (hasDefense ? '<span class="student-evidence">Assessment completed · not independent skill verification</span>' : '') +
           (links.length ? '<div class="student-project-item__links">' + links.join("") + '</div>' : '') +
         '</div>' +
         '<div class="student-project-item__actions">' +
-          '<button class="btn btn--text" type="button" data-student-project-edit="' + project.id + '">Edit</button>' +
-          '<button class="btn btn--text" type="button" data-student-project-delete="' + project.id + '">Delete</button>' +
+          '<button class="btn btn--secondary" type="button" data-student-project-defense="' + escapeHtml(project.id) + '"' + (readyForDefense ? '' : ' disabled title="Add a description, technologies and role before preparing a defense"') + '>Prepare defense</button>' +
+          '<button class="btn btn--text" type="button" data-student-project-edit="' + escapeHtml(project.id) + '" aria-label="Edit project ' + escapeHtml(project.title) + '">Edit</button>' +
+          '<button class="btn btn--text" type="button" data-student-project-delete="' + escapeHtml(project.id) + '" aria-label="Delete project ' + escapeHtml(project.title) + '">Delete</button>' +
         '</div>' +
       '</li>';
     }).join("");
   }
 
+  function buildDefenseQuestions(project) {
+    var description = project.description.trim().replace(/\s+/g, " ").slice(0, 140);
+    var technologies = project.technologies.split(/[,;|]/).map(function (technology) { return technology.trim(); }).filter(Boolean).slice(0, 4).join(", ") || project.technologies;
+    var role = project.role.trim().replace(/\s+/g, " ").slice(0, 120);
+    var repoContext = project.githubUrl && isHttpUrl(project.githubUrl)
+      ? "A repository link is listed (" + new URL(project.githubUrl).hostname + "); NEXORA has not inspected it."
+      : "No repository link is listed.";
+    return [
+      { category: "Architecture", text: "Based on your project summary (“" + description + (description.length >= 140 ? "…" : "") + "”), how did you structure its main components and how do they work together?" },
+      { category: "Implementation choices", text: "You listed " + technologies + ". Why were these technologies appropriate for this project, and what did you implement with them?" },
+      { category: "Technical challenge", text: "What was a significant technical challenge in this project, and how did you approach solving it?" },
+      { category: "Debugging", text: "Describe a bug or unexpected behavior you encountered, how you investigated it, and what evidence showed your fix worked. " + repoContext },
+      { category: "Trade-offs", text: "What implementation or design trade-off did you make, and what alternative did you consider?" },
+      { category: "Individual contribution", text: "Your saved role is “" + role + "”. Which specific parts did you personally complete, and how would you explain your contribution to a reviewer?" }
+    ];
+  }
+
+  function summarizeDefenseSession(session) {
+    var answered = session.questions.filter(function (question) { return question.answer.trim(); });
+    var detailed = answered.filter(function (question) { return question.answer.trim().split(/\s+/).length >= 20; });
+    return {
+      answeredCount: answered.length,
+      strengths: [
+        "You submitted responses for " + answered.length + " of " + session.questions.length + " prompts.",
+        detailed.length
+          ? detailed.length + " response(s) included at least 20 words of explanation."
+          : "No response reached the simple 20-word detail indicator; consider adding more explanation where useful."
+      ],
+      unanswered: session.questions.filter(function (question) { return !question.answer.trim(); }).map(function (question) { return question.category; }),
+      reviewTopics: session.questions.filter(function (question) { return !question.answer.trim(); }).map(function (question) { return question.category; }).length
+        ? session.questions.filter(function (question) { return !question.answer.trim(); }).map(function (question) { return "Prepare an explanation for " + question.category.toLowerCase() + "."; })
+        : ["Consider practicing with concrete examples, decisions, and evidence from your own work."]
+    };
+  }
+
+  function saveDefenseProfile(profile, statusMessage) {
+    profile.updatedAt = new Date().toISOString();
+    if (!writeDemoProfile(profile)) {
+      var status = document.getElementById("student-defense-status");
+      if (status) status.textContent = "Could not save the assessment in this browser. Check browser storage and try again.";
+      return false;
+    }
+    renderStudentProjectEditor();
+    renderStudentDefense();
+    if (typeof renderRecruiterApplicants === "function") renderRecruiterApplicants(getCurrentRecruiterListings());
+    var message = document.getElementById("student-defense-status");
+    if (message && statusMessage) message.textContent = statusMessage;
+    return true;
+  }
+
+  function defenseSessionById(profile, id) {
+    return profile.defenseSessions.find(function (session) { return session.id === id; }) || null;
+  }
+
+  function renderStudentDefense() {
+    var picker = document.getElementById("student-defense-project");
+    var historyList = document.getElementById("student-defense-history-list");
+    var activePanel = document.getElementById("student-defense-active");
+    var reviewPanel = document.getElementById("student-defense-review");
+    var resultPanel = document.getElementById("student-defense-result");
+    if (!picker || !historyList || !activePanel || !reviewPanel || !resultPanel) return;
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var previousValue = picker.value;
+    picker.innerHTML = '<option value="">Select a project</option>' + profile.projects.map(function (project) {
+      var ready = !!(project.description && project.technologies && project.role);
+      return '<option value="' + escapeHtml(project.id) + '"' + (ready ? '' : ' disabled') + '>' + escapeHtml(project.title) + (ready ? '' : ' (add description, technologies and role)') + '</option>';
+    }).join("");
+    if (profile.projects.some(function (project) { return project.id === previousValue; })) picker.value = previousValue;
+    historyList.innerHTML = profile.defenseSessions.length ? profile.defenseSessions.slice().reverse().map(function (session) {
+      var completedTime = Date.parse(session.completedAt);
+      var completedDate = session.completedAt && isFinite(completedTime) ? new Date(completedTime).toLocaleDateString() : "";
+      return '<li class="defense-history-item"><div><strong>' + escapeHtml(session.project.title || "Untitled project") + '</strong>' +
+        '<span class="student-item__meta">' + (session.status === "completed" ? "Assessment completed" : "In progress") +
+        (completedDate ? " · " + escapeHtml(completedDate) : "") +
+        (session.shareWithRecruiters ? " · Shared with recruiters in this browser" : " · Private") + '</span></div>' +
+        '<button class="btn btn--text" type="button" data-defense-open="' + escapeHtml(session.id) + '">' + (session.status === "completed" ? "Review" : "Continue") + '</button></li>';
+    }).join("") : '<li class="empty--compact"><p>No saved defense sessions yet. Choose a complete project above to begin.</p></li>';
+
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session && profile.defenseSessions.length) {
+      session = profile.defenseSessions[profile.defenseSessions.length - 1];
+      activeDefenseSessionId = session.id;
+    }
+    activePanel.hidden = true;
+    reviewPanel.hidden = true;
+    resultPanel.hidden = true;
+    if (!session) return;
+    if (session.status === "completed") {
+      renderDefenseResult(session);
+      resultPanel.hidden = false;
+      return;
+    }
+    if (session.currentIndex >= session.questions.length) {
+      renderDefenseReview(session);
+      reviewPanel.hidden = false;
+      return;
+    }
+    var question = session.questions[session.currentIndex];
+    document.getElementById("student-defense-progress").textContent = "Question " + (session.currentIndex + 1) + " of " + session.questions.length + " · " + question.category;
+    document.getElementById("student-defense-question-title").textContent = question.text;
+    document.getElementById("student-defense-answer").value = question.answer;
+    document.getElementById("student-defense-project-context").textContent = "Selected project: " + (session.project.title || "Project details saved at session start") + ". Project information and links are student-provided; repository contents were not inspected.";
+    activePanel.hidden = false;
+  }
+
+  function renderDefenseReview(session) {
+    var list = document.getElementById("student-defense-review-list");
+    list.innerHTML = session.questions.map(function (question) {
+      return '<li><strong>' + escapeHtml(question.category) + '</strong><p>' + escapeHtml(question.text) + '</p><p>' + escapeHtml(question.answer.trim() || "No response submitted.") + '</p></li>';
+    }).join("");
+  }
+
+  function renderDefenseResult(session) {
+    var result = summarizeDefenseSession(session);
+    document.getElementById("student-defense-strengths").innerHTML = result.strengths.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("");
+    document.getElementById("student-defense-unanswered").innerHTML = result.unanswered.length
+      ? result.unanswered.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("")
+      : "<li>All prompts received a response.</li>";
+    document.getElementById("student-defense-review-topics").innerHTML = result.reviewTopics.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("");
+    var share = document.getElementById("student-defense-share");
+    share.checked = session.shareWithRecruiters;
+    share.setAttribute("aria-describedby", "student-defense-result-disclaimer");
+  }
+
+  function startStudentDefense(projectId) {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var project = profile.projects.find(function (item) { return item.id === projectId; });
+    var status = document.getElementById("student-defense-status");
+    if (!project || !project.description || !project.technologies || !project.role) {
+      if (status) status.textContent = "Choose a saved project with a description, technologies, and your role before starting.";
+      return;
+    }
+    var existing = profile.defenseSessions.slice().reverse().find(function (item) {
+      return item.projectId === project.id && item.status === "in-progress";
+    });
+    if (existing) {
+      activeDefenseSessionId = existing.id;
+      renderStudentDefense();
+      return;
+    }
+    var sessionId = "defense_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    var session = {
+      id: sessionId,
+      projectId: project.id,
+      project: {
+        id: project.id,
+        title: project.title,
+        description: project.description,
+        technologies: project.technologies,
+        role: project.role,
+        githubUrl: project.githubUrl,
+        liveDemoUrl: project.liveDemoUrl
+      },
+      questions: buildDefenseQuestions(project).map(function (question) {
+        return { category: question.category, text: question.text, answer: "" };
+      }),
+      currentIndex: 0,
+      status: "in-progress",
+      startedAt: new Date().toISOString(),
+      completedAt: "",
+      shareWithRecruiters: false,
+      result: { strengths: [], unanswered: [], reviewTopics: [], answeredCount: 0 }
+    };
+    profile.defenseSessions.push(session);
+    activeDefenseSessionId = session.id;
+    saveDefenseProfile(profile, "Project Defense started. Your draft is saved in this browser.");
+  }
+
+  function saveDefenseAnswer(skip) {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session || session.status !== "in-progress") return;
+    if (!skip) session.questions[session.currentIndex].answer = document.getElementById("student-defense-answer").value.slice(0, 3000);
+    session.currentIndex = Math.min(session.currentIndex + 1, session.questions.length);
+    saveDefenseProfile(profile, session.currentIndex === session.questions.length
+      ? "All questions are ready for review. Review answers before finishing."
+      : "Response saved in this browser.");
+  }
+
+  function finishStudentDefense() {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session || session.status !== "in-progress" || session.currentIndex < session.questions.length) return;
+    session.status = "completed";
+    session.completedAt = new Date().toISOString();
+    session.shareWithRecruiters = false;
+    session.result = summarizeDefenseSession(session);
+    saveDefenseProfile(profile, "Assessment completed and saved privately in this browser. You can opt in to sharing below.");
+  }
+
+  function setDefenseSharing(share) {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session || session.status !== "completed") return;
+    session.shareWithRecruiters = share === true;
+    saveDefenseProfile(profile, session.shareWithRecruiters
+      ? "This completed session is now available in the local recruiter demo for your linked profile."
+      : "Sharing is turned off. Recruiters will no longer see this session in the local demo.");
+  }
+
+  function restartStudentDefense() {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session) return;
+    if (!window.confirm("Restart this session? Its current answers will be cleared.")) return;
+    session.questions.forEach(function (question) { question.answer = ""; });
+    session.currentIndex = 0;
+    session.status = "in-progress";
+    session.startedAt = new Date().toISOString();
+    session.completedAt = "";
+    session.shareWithRecruiters = false;
+    session.result = { strengths: [], unanswered: [], reviewTopics: [], answeredCount: 0 };
+    saveDefenseProfile(profile, "Session restarted. Answers cleared and session saved.");
+  }
+
+  var skillGapTemplates = {
+    "Frontend Developer": ["HTML", "CSS", "JavaScript", "Responsive design", "Accessibility", "Git"],
+    "Backend Developer": ["Programming fundamentals", "API design", "Databases", "Authentication concepts", "Testing", "Git"],
+    "Full-Stack Developer": ["HTML", "CSS", "JavaScript", "API design", "Databases", "Testing", "Git"],
+    "Data Analyst": ["SQL", "Spreadsheets", "Data cleaning", "Data visualization", "Statistics", "Python"],
+    "AI/ML Engineer": ["Python", "Linear algebra", "Statistics", "Data preparation", "Machine learning fundamentals", "Model evaluation"],
+    "Cybersecurity Analyst": ["Networking fundamentals", "Linux", "Security fundamentals", "Log analysis", "Risk assessment", "Scripting"]
+  };
+  var skillGapRoadmapEditing = false;
+
+  function uniqueSkillNames(values) {
+    var seen = Object.create(null);
+    return values.map(function (value) { return String(value || "").trim(); }).filter(function (value) {
+      var key = value.toLowerCase().replace(/\s+/g, " ");
+      if (!key || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  function skillGapJobs() {
+    return Array.isArray(allJobs) ? allJobs.filter(function (job) {
+      return job && job.title && job.company;
+    }) : [];
+  }
+
+  function updateSkillGapModeFields() {
+    var mode = document.getElementById("skill-gap-mode");
+    if (!mode) return;
+    var isJob = mode.value === "job";
+    document.getElementById("skill-gap-role-field").hidden = isJob;
+    document.getElementById("skill-gap-custom-field").hidden = isJob || document.getElementById("skill-gap-role").value !== "custom";
+    document.getElementById("skill-gap-job-field").hidden = !isJob;
+    document.getElementById("skill-gap-template-field").hidden = isJob;
+  }
+
+  function fillSkillGapJobOptions(selectedId) {
+    var select = document.getElementById("skill-gap-job");
+    if (!select) return;
+    var jobs = skillGapJobs();
+    select.innerHTML = '<option value="">Choose an active listing</option>' + jobs.map(function (job) {
+      return '<option value="' + escapeHtml(String(job.id)) + '">' + escapeHtml(job.title + " · " + job.company) + '</option>';
+    }).join("");
+    if (selectedId && jobs.some(function (job) { return String(job.id) === String(selectedId); })) select.value = String(selectedId);
+  }
+
+  function skillGapEvidenceForSkill(skill, profile) {
+    var project = skill.projectId ? profile.projects.find(function (item) { return item.id === skill.projectId; }) : null;
+    var hasProjectEvidence = skill.evidence === "project-linked";
+    var completedDefense = hasProjectEvidence && skill.projectId && profile.defenseSessions.some(function (session) {
+      return session.projectId === skill.projectId && session.status === "completed";
+    });
+    return {
+      kind: hasProjectEvidence ? "project-linked" : "self-declared",
+      project: project,
+      completedDefense: !!completedDefense
+    };
+  }
+
+  function roadmapExerciseForSkill(skillName, profile) {
+    var skillLower = skillName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var skillPattern = new RegExp("(^|[^a-z0-9])" + skillLower + "($|[^a-z0-9])", "i");
+    var project = profile.projects.find(function (item) {
+      var technologyMatches = item.technologies.split(/[,;|]/).some(function (technology) {
+        return technology.trim().toLowerCase() === skillName.toLowerCase();
+      });
+      return technologyMatches || skillPattern.test(item.title + " " + item.description);
+    });
+    if (project) {
+      return {
+        projectId: project.id,
+        text: "Extend “" + project.title + "” with a small feature that uses " + skillName + "; describe and test your contribution."
+      };
+    }
+    return {
+      projectId: "",
+      text: "Build a small, focused project that uses " + skillName + ", then document your design choice and how you checked the result."
+    };
+  }
+
+  function createSkillGapRoadmap(gaps, evidenceGaps, profile, targetName) {
+    var steps = [];
+    gaps.concat(evidenceGaps).forEach(function (skillName, index) {
+      if (steps.some(function (step) { return step.skill.toLowerCase() === skillName.toLowerCase(); })) return;
+      var exercise = roadmapExerciseForSkill(skillName, profile);
+      steps.push({
+        id: "roadmap_" + Date.now() + "_" + index + "_" + Math.random().toString(36).slice(2, 5),
+        skill: skillName,
+        why: gaps.some(function (gap) { return gap.toLowerCase() === skillName.toLowerCase(); })
+          ? skillName + " appears in the selected " + targetName + " skill requirements but is not in your saved skills."
+          : skillName + " matches the target but is currently self-declared without a project link.",
+        exercise: exercise.text,
+        projectId: exercise.projectId,
+        completed: false
+      });
+    });
+    return steps;
+  }
+
+  function analyzeSkillGaps() {
+    var mode = document.getElementById("skill-gap-mode").value;
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var targetName = "";
+    var targetJob = null;
+    var requiredSkills = [];
+    var additionalRequirements = [];
+    if (mode === "job") {
+      var selectedJobId = document.getElementById("skill-gap-job").value;
+      targetJob = skillGapJobs().find(function (job) { return String(job.id) === selectedJobId; }) || null;
+      if (!targetJob) {
+        document.getElementById("skill-gap-status").textContent = "Choose an available listing before analyzing its recorded requirements.";
+        return;
+      }
+      targetName = targetJob.title + " · " + targetJob.company;
+      requiredSkills = uniqueSkillNames(Array.isArray(targetJob.skills) ? targetJob.skills : []);
+      var qualifications = Array.isArray(targetJob.qualifications) ? targetJob.qualifications : [];
+      additionalRequirements = uniqueSkillNames(qualifications.concat(targetJob.eligibility || []));
+    } else {
+      var roleChoice = document.getElementById("skill-gap-role").value;
+      targetName = roleChoice === "custom" ? document.getElementById("skill-gap-custom-role").value.trim() : roleChoice;
+      if (!targetName) {
+        document.getElementById("skill-gap-status").textContent = "Enter a target role before analyzing its demo template.";
+        return;
+      }
+      requiredSkills = uniqueSkillNames(document.getElementById("skill-gap-template").value.split(","));
+    }
+    if (requiredSkills.length > 40) requiredSkills = requiredSkills.slice(0, 40);
+    var normalizedSkills = Object.create(null);
+    profile.skills.forEach(function (skill) {
+      var key = skill.name.toLowerCase().replace(/\s+/g, " ");
+      if (!normalizedSkills[key]) normalizedSkills[key] = skill;
+    });
+    var matching = [];
+    var missing = [];
+    var projectEvidence = [];
+    var moreEvidence = [];
+    requiredSkills.forEach(function (required) {
+      var skill = normalizedSkills[required.toLowerCase().replace(/\s+/g, " ")];
+      if (!skill) {
+        missing.push(required);
+        return;
+      }
+      matching.push({ requirement: required, skill: skill, evidence: skillGapEvidenceForSkill(skill, profile) });
+      if (skill.evidence === "project-linked") projectEvidence.push({ requirement: required, skill: skill, evidence: skillGapEvidenceForSkill(skill, profile) });
+      else moreEvidence.push({ requirement: required, skill: skill, evidence: skillGapEvidenceForSkill(skill, profile) });
+    });
+    var incomplete = [];
+    if (!profile.fullName || !profile.headline) incomplete.push("name or headline is missing");
+    if (!profile.skills.length) incomplete.push("no saved skills are available for comparison");
+    if (!profile.projects.length) incomplete.push("no projects are available for project-evidence suggestions");
+    if (mode === "job" && !requiredSkills.length) incomplete.push("the selected listing has no recorded skill requirements to compare");
+    if (mode === "role" && !requiredSkills.length) incomplete.push("the editable demo template has no skills");
+    var roadmap = createSkillGapRoadmap(missing, moreEvidence.map(function (item) { return item.requirement; }), profile, targetName);
+    var analysis = {
+      mode: mode,
+      role: mode === "role" ? targetName : "",
+      jobId: targetJob ? String(targetJob.id) : "",
+      jobTitle: targetJob ? targetJob.title : "",
+      requiredSkills: requiredSkills,
+      additionalRequirements: additionalRequirements,
+      analyzedAt: new Date().toISOString(),
+      steps: roadmap
+    };
+    var rawProfile = readDemoProfile();
+    rawProfile.skillGapAnalysis = analysis;
+    if (!writeDemoProfile(rawProfile)) {
+      document.getElementById("skill-gap-status").textContent = "Could not save this analysis in the browser. Check browser storage and try again.";
+      return;
+    }
+    skillGapRoadmapEditing = false;
+    renderSkillGapAnalysis(analysis, profile);
+    document.getElementById("skill-gap-status").textContent = "Analysis and a starting roadmap were saved in this browser. Matching uses skill names only.";
+  }
+
+  function renderSkillGapAnalysis(analysis, profile) {
+    var resultPanel = document.getElementById("skill-gap-results");
+    if (!resultPanel) return;
+    if (!analysis) {
+      resultPanel.hidden = true;
+      return;
+    }
+    var sourceProfile = profile || normalizeStudentProfile(readDemoProfile());
+    var jobs = skillGapJobs();
+    var targetJob = analysis.mode === "job" ? jobs.find(function (job) { return String(job.id) === analysis.jobId; }) : null;
+    var targetName = analysis.mode === "job"
+      ? (targetJob ? targetJob.title + " · " + targetJob.company : analysis.jobTitle || "Selected job")
+      : analysis.role;
+    var requiredSkills = analysis.requiredSkills;
+    var skillByName = Object.create(null);
+    sourceProfile.skills.forEach(function (skill) {
+      var key = skill.name.toLowerCase().replace(/\s+/g, " ");
+      if (!skillByName[key]) skillByName[key] = skill;
+    });
+    var matching = [];
+    var missing = [];
+    var projectEvidence = [];
+    var moreEvidence = [];
+    requiredSkills.forEach(function (required) {
+      var skill = skillByName[required.toLowerCase().replace(/\s+/g, " ")];
+      if (!skill) { missing.push(required); return; }
+      var evidence = skillGapEvidenceForSkill(skill, sourceProfile);
+      var row = { requirement: required, skill: skill, evidence: evidence };
+      matching.push(row);
+      if (evidence.kind === "project-linked") projectEvidence.push(row);
+      else moreEvidence.push(row);
+    });
+    var denominator = requiredSkills.length;
+    var readiness = denominator ? Math.round((matching.length / denominator) * 100) : null;
+    var incomplete = [];
+    if (!sourceProfile.fullName || !sourceProfile.headline) incomplete.push("some profile identity/headline fields are missing");
+    if (!sourceProfile.skills.length) incomplete.push("no saved skills were available");
+    if (!sourceProfile.projects.length) incomplete.push("no saved projects were available");
+    if (!denominator) incomplete.push("the target contains no recorded skills, so readiness cannot be calculated");
+    document.getElementById("skill-gap-results").hidden = false;
+    document.getElementById("skill-gap-summary-title").textContent = (analysis.mode === "job" ? "Job-specific analysis: " : "Generic role analysis: ") + (targetName || "Target role");
+    document.getElementById("skill-gap-readiness").textContent = readiness === null
+      ? "Readiness percentage: not available"
+      : "Name-match coverage: " + readiness + "%";
+    document.getElementById("skill-gap-readiness-method").textContent = denominator
+      ? "Formula: exact case-insensitive skill-name matches ÷ " + denominator + " unique target skills × 100 = " + matching.length + " ÷ " + denominator + " × 100. Self-declared and project-linked matches count equally. This is not a measure or guarantee of employability."
+      : "No percentage is shown because the target listing has no recorded skill list.";
+    document.getElementById("skill-gap-incomplete").textContent = incomplete.length
+      ? "Incomplete comparison: " + incomplete.join("; ") + "."
+      : "Comparison uses the profile data currently saved; missing profile fields are not inferred.";
+    function renderSkillRows(rows, emptyText, includeEvidence) {
+      if (!rows.length) return '<li class="empty--compact">' + escapeHtml(emptyText) + '</li>';
+      return rows.map(function (row) {
+        return '<li class="student-item"><strong>' + escapeHtml(row.requirement) + '</strong>' +
+          (includeEvidence ? (function () {
+            var evidence = row.evidence;
+            var detail = evidence.kind === "project-linked"
+              ? "Project-linked" + (evidence.project ? " · " + evidence.project.title : " · linked project not present")
+              : "Self-declared";
+            if (evidence.completedDefense) detail += " · Project Defense assessment completed (not independently verified)";
+            return '<span class="student-item__meta">Saved as ' + escapeHtml(row.skill.name) + ' · ' + escapeHtml(detail) + '</span>';
+          })() : '') +
+          '</li>';
+      }).join("");
+    }
+    document.getElementById("skill-gap-matching").innerHTML = renderSkillRows(matching, "No target skills match saved skill names.", true);
+    document.getElementById("skill-gap-missing").innerHTML = renderSkillRows(missing.map(function (skill) { return { requirement: skill }; }), "No missing target skills by name.", false);
+    document.getElementById("skill-gap-evidence").innerHTML = renderSkillRows(projectEvidence, "No matched target skills are currently project-linked.", true);
+    document.getElementById("skill-gap-more-evidence").innerHTML = renderSkillRows(moreEvidence, "No matched skills are currently classified as self-declared.", true);
+    var additional = analysis.additionalRequirements.length
+      ? "Other recorded job requirements (shown separately; not scored as skills): " + analysis.additionalRequirements.join(" · ")
+      : analysis.mode === "job" ? "This listing has no additional eligibility/qualification text recorded." : "Generic role template; no separate job requirements apply.";
+    document.getElementById("skill-gap-additional-requirements").textContent = additional;
+    fillSkillGapJobOptions(analysis.mode === "job" ? analysis.jobId : "");
+    document.getElementById("skill-gap-mode").value = analysis.mode;
+    document.getElementById("skill-gap-role").value = Object.prototype.hasOwnProperty.call(skillGapTemplates, analysis.role) ? analysis.role : "custom";
+    document.getElementById("skill-gap-custom-role").value = document.getElementById("skill-gap-role").value === "custom" ? analysis.role : "";
+    document.getElementById("skill-gap-template").value = analysis.mode === "role" ? analysis.requiredSkills.join(", ") : "";
+    updateSkillGapModeFields();
+    renderSkillGapRoadmap(analysis);
+  }
+
+  function renderSkillGapRoadmap(analysis) {
+    var list = document.getElementById("skill-gap-roadmap-list");
+    if (!list) return;
+    var steps = analysis.steps || [];
+    document.getElementById("skill-gap-roadmap-empty").hidden = steps.length > 0;
+    list.innerHTML = steps.map(function (step, index) {
+      if (skillGapRoadmapEditing) {
+        return '<li class="roadmap-step roadmap-step--editing" data-roadmap-id="' + escapeHtml(step.id) + '">' +
+          '<label class="roadmap-step__complete"><input type="checkbox" data-roadmap-complete="' + escapeHtml(step.id) + '"' + (step.completed ? ' checked' : '') + '> Completed</label>' +
+          '<div class="field-group"><label for="roadmap-skill-' + index + '">Skill/topic</label><input class="input" id="roadmap-skill-' + index + '" data-roadmap-skill value="' + escapeHtml(step.skill) + '" maxlength="100"></div>' +
+          '<div class="field-group"><label for="roadmap-why-' + index + '">Why it matters</label><input class="input" id="roadmap-why-' + index + '" data-roadmap-why value="' + escapeHtml(step.why) + '" maxlength="240"></div>' +
+          '<div class="field-group"><label for="roadmap-exercise-' + index + '">Practical exercise</label><input class="input" id="roadmap-exercise-' + index + '" data-roadmap-exercise value="' + escapeHtml(step.exercise) + '" maxlength="400"></div>' +
+          '<button class="btn btn--text" type="button" data-roadmap-delete="' + escapeHtml(step.id) + '">Remove step</button></li>';
+      }
+      var project = step.projectId ? normalizeStudentProfile(readDemoProfile()).projects.find(function (item) { return item.id === step.projectId; }) : null;
+      return '<li class="roadmap-step' + (step.completed ? ' is-complete' : '') + '">' +
+        '<label class="roadmap-step__complete"><input type="checkbox" data-roadmap-complete="' + escapeHtml(step.id) + '"' + (step.completed ? ' checked' : '') + '> Mark complete</label>' +
+        '<h5>' + escapeHtml(step.skill) + '</h5><p><strong>Why:</strong> ' + escapeHtml(step.why) + '</p>' +
+        '<p><strong>Exercise:</strong> ' + escapeHtml(step.exercise) + '</p>' +
+        (project ? '<p class="student-item__meta">Suggested existing project: ' + escapeHtml(project.title) + '</p>' : '') +
+        '</li>';
+    }).join("");
+    document.getElementById("skill-gap-edit-roadmap").disabled = skillGapRoadmapEditing;
+  }
+
+  function renderSkillGapAnalyzer() {
+    var roleSelect = document.getElementById("skill-gap-role");
+    var template = document.getElementById("skill-gap-template");
+    if (!roleSelect || !template) return;
+    fillSkillGapJobOptions();
+    var profile = normalizeStudentProfile(readDemoProfile());
+    if (profile.skillGapAnalysis) {
+      renderSkillGapAnalysis(profile.skillGapAnalysis, profile);
+      return;
+    }
+    template.value = (skillGapTemplates[roleSelect.value] || skillGapTemplates["Frontend Developer"]).join(", ");
+    document.getElementById("skill-gap-results").hidden = true;
+    updateSkillGapModeFields();
+  }
+
+  function saveSkillGapRoadmap(analysis) {
+    var profile = readDemoProfile();
+    var normalized = normalizeSkillGapAnalysis(analysis);
+    if (!normalized) return false;
+    profile.skillGapAnalysis = normalized;
+    profile.updatedAt = new Date().toISOString();
+    if (!writeDemoProfile(profile)) {
+      document.getElementById("skill-gap-status").textContent = "Roadmap could not be saved in this browser. Check browser storage and try again.";
+      return false;
+    }
+    renderSkillGapAnalysis(normalized);
+    return true;
+  }
+
+  function readEditedRoadmapSteps(analysis) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#skill-gap-roadmap-list .roadmap-step"));
+    var updated = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var skill = row.querySelector("[data-roadmap-skill]").value.trim();
+      var why = row.querySelector("[data-roadmap-why]").value.trim();
+      var exercise = row.querySelector("[data-roadmap-exercise]").value.trim();
+      if (!skill || !why || !exercise) {
+        document.getElementById("skill-gap-status").textContent = "Each roadmap step needs a topic, reason, and practical exercise.";
+        row.querySelector("[data-roadmap-skill]").focus();
+        return null;
+      }
+      var existing = analysis.steps.find(function (step) { return step.id === row.dataset.roadmapId; });
+      if (!existing) continue;
+      updated.push({
+        id: existing.id,
+        skill: skill,
+        why: why,
+        exercise: exercise,
+        projectId: existing.projectId,
+        completed: row.querySelector("[data-roadmap-complete]").checked
+      });
+    }
+    return updated;
+  }
+
+  function setRoadmapCompletion(stepId, complete) {
+    var profile = readDemoProfile();
+    var analysis = normalizeSkillGapAnalysis(profile.skillGapAnalysis);
+    if (!analysis) return;
+    var step = analysis.steps.find(function (item) { return item.id === stepId; });
+    if (!step) return;
+    step.completed = complete;
+    if (saveSkillGapRoadmap(analysis)) {
+      document.getElementById("skill-gap-status").textContent = "Roadmap progress saved in this browser.";
+    }
+  }
+
+  var skillGapModeSelect = document.getElementById("skill-gap-mode");
+  if (skillGapModeSelect) skillGapModeSelect.addEventListener("change", updateSkillGapModeFields);
+  var skillGapRoleSelect = document.getElementById("skill-gap-role");
+  if (skillGapRoleSelect) skillGapRoleSelect.addEventListener("change", function () {
+    var template = document.getElementById("skill-gap-template");
+    if (skillGapTemplates[skillGapRoleSelect.value] && template) template.value = skillGapTemplates[skillGapRoleSelect.value].join(", ");
+    updateSkillGapModeFields();
+  });
+  var skillGapAnalyzeButton = document.getElementById("skill-gap-analyze");
+  if (skillGapAnalyzeButton) skillGapAnalyzeButton.addEventListener("click", analyzeSkillGaps);
+  var skillGapEditButton = document.getElementById("skill-gap-edit-roadmap");
+  if (skillGapEditButton) skillGapEditButton.addEventListener("click", function () {
+    skillGapRoadmapEditing = true;
+    var editor = document.getElementById("skill-gap-roadmap-editor");
+    editor.hidden = false;
+    renderSkillGapRoadmap(normalizeStudentProfile(readDemoProfile()).skillGapAnalysis);
+  });
+  var skillGapCancelEditButton = document.getElementById("skill-gap-cancel-roadmap");
+  if (skillGapCancelEditButton) skillGapCancelEditButton.addEventListener("click", function () {
+    skillGapRoadmapEditing = false;
+    document.getElementById("skill-gap-roadmap-editor").hidden = true;
+    renderSkillGapAnalyzer();
+  });
+  var skillGapAddStepButton = document.getElementById("skill-gap-add-step");
+  if (skillGapAddStepButton) skillGapAddStepButton.addEventListener("click", function () {
+    var skill = document.getElementById("skill-gap-new-topic").value.trim();
+    var why = document.getElementById("skill-gap-new-why").value.trim();
+    var exercise = document.getElementById("skill-gap-new-exercise").value.trim();
+    if (!skill || !why || !exercise) {
+      document.getElementById("skill-gap-status").textContent = "Enter a topic, why it matters, and a practical exercise before adding a step.";
+      return;
+    }
+    var profile = readDemoProfile();
+    var analysis = normalizeSkillGapAnalysis(profile.skillGapAnalysis);
+    if (!analysis || analysis.steps.length >= 30) {
+      document.getElementById("skill-gap-status").textContent = analysis ? "A roadmap can contain at most 30 steps." : "Analyze a target before adding roadmap steps.";
+      return;
+    }
+    if (skillGapRoadmapEditing) {
+      var editedSteps = readEditedRoadmapSteps(analysis);
+      if (!editedSteps) return;
+      analysis.steps = editedSteps;
+    }
+    analysis.steps.push({
+      id: "roadmap_custom_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      skill: skill,
+      why: why,
+      exercise: exercise,
+      projectId: "",
+      completed: false
+    });
+    document.getElementById("skill-gap-new-topic").value = "";
+    document.getElementById("skill-gap-new-why").value = "";
+    document.getElementById("skill-gap-new-exercise").value = "";
+    profile.skillGapAnalysis = analysis;
+    if (!writeDemoProfile(profile)) {
+      document.getElementById("skill-gap-status").textContent = "Could not add the roadmap step. Check browser storage and try again.";
+      return;
+    }
+    renderSkillGapAnalyzer();
+    skillGapRoadmapEditing = true;
+    document.getElementById("skill-gap-roadmap-editor").hidden = false;
+    renderSkillGapRoadmap(normalizeStudentProfile(readDemoProfile()).skillGapAnalysis);
+    document.getElementById("skill-gap-status").textContent = "Custom roadmap step added. Save roadmap edits when finished.";
+  });
+  var skillGapSaveRoadmapButton = document.getElementById("skill-gap-save-roadmap");
+  if (skillGapSaveRoadmapButton) skillGapSaveRoadmapButton.addEventListener("click", function () {
+    var profile = readDemoProfile();
+    var analysis = normalizeSkillGapAnalysis(profile.skillGapAnalysis);
+    if (!analysis) return;
+    var updatedSteps = readEditedRoadmapSteps(analysis);
+    if (!updatedSteps) return;
+    analysis.steps = updatedSteps;
+    skillGapRoadmapEditing = false;
+    document.getElementById("skill-gap-roadmap-editor").hidden = true;
+    if (saveSkillGapRoadmap(analysis)) document.getElementById("skill-gap-status").textContent = "Roadmap edits saved in this browser.";
+  });
+  var skillGapResetRoadmapButton = document.getElementById("skill-gap-reset-roadmap");
+  if (skillGapResetRoadmapButton) skillGapResetRoadmapButton.addEventListener("click", function () {
+    if (!window.confirm("Reset this roadmap? This removes its steps and completion progress from this browser. You can analyze the target again to create a new roadmap.")) return;
+    var profile = readDemoProfile();
+    profile.skillGapAnalysis = null;
+    profile.updatedAt = new Date().toISOString();
+    if (!writeDemoProfile(profile)) {
+      document.getElementById("skill-gap-status").textContent = "Roadmap could not be reset. Check browser storage and try again.";
+      return;
+    }
+    skillGapRoadmapEditing = false;
+    document.getElementById("skill-gap-roadmap-editor").hidden = true;
+    document.getElementById("skill-gap-status").textContent = "Roadmap reset. Choose a target and analyze again when ready.";
+    renderSkillGapAnalyzer();
+  });
+  document.addEventListener("change", function (event) {
+    var checkbox = event.target.closest("[data-roadmap-complete]");
+    if (!checkbox || skillGapRoadmapEditing) return;
+    setRoadmapCompletion(checkbox.dataset.roadmapComplete, checkbox.checked);
+  });
+  document.addEventListener("click", function (event) {
+    var removeStep = event.target.closest("[data-roadmap-delete]");
+    if (!removeStep) return;
+    var profile = readDemoProfile();
+    var analysis = normalizeSkillGapAnalysis(profile.skillGapAnalysis);
+    if (!analysis) return;
+    if (skillGapRoadmapEditing) {
+      var editedSteps = readEditedRoadmapSteps(analysis);
+      if (!editedSteps) return;
+      analysis.steps = editedSteps;
+    }
+    analysis.steps = analysis.steps.filter(function (step) { return step.id !== removeStep.dataset.roadmapDelete; });
+    profile.skillGapAnalysis = analysis;
+    if (!writeDemoProfile(profile)) {
+      document.getElementById("skill-gap-status").textContent = "Could not remove this roadmap step. Check browser storage and try again.";
+      return;
+    }
+    renderSkillGapAnalyzer();
+    skillGapRoadmapEditing = true;
+    document.getElementById("skill-gap-roadmap-editor").hidden = false;
+    renderSkillGapRoadmap(normalizeStudentProfile(readDemoProfile()).skillGapAnalysis);
+  });
+
+  var defenseStartButton = document.getElementById("student-defense-start");
+  if (defenseStartButton) defenseStartButton.addEventListener("click", function () {
+    startStudentDefense(document.getElementById("student-defense-project").value);
+  });
+  var defenseSaveAnswerButton = document.getElementById("student-defense-save-answer");
+  if (defenseSaveAnswerButton) defenseSaveAnswerButton.addEventListener("click", function () { saveDefenseAnswer(false); });
+  var defenseSkipButton = document.getElementById("student-defense-skip");
+  if (defenseSkipButton) defenseSkipButton.addEventListener("click", function () { saveDefenseAnswer(true); });
+  var defenseBackButton = document.getElementById("student-defense-back");
+  if (defenseBackButton) defenseBackButton.addEventListener("click", function () {
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var session = defenseSessionById(profile, activeDefenseSessionId);
+    if (!session || !session.questions.length) return;
+    session.currentIndex = session.questions.length - 1;
+    saveDefenseProfile(profile, "You can review or update the last response.");
+  });
+  var defenseFinishButton = document.getElementById("student-defense-finish");
+  if (defenseFinishButton) defenseFinishButton.addEventListener("click", finishStudentDefense);
+  var defenseShareCheckbox = document.getElementById("student-defense-share");
+  if (defenseShareCheckbox) defenseShareCheckbox.addEventListener("change", function () { setDefenseSharing(defenseShareCheckbox.checked); });
+  var defenseRestartButton = document.getElementById("student-defense-restart");
+  if (defenseRestartButton) defenseRestartButton.addEventListener("click", restartStudentDefense);
+
   function calculateProfileCompletion(profile) {
     var p = normalizeStudentProfile(profile);
     var values = [
-      p.fullName, p.headline, p.educationLevel, p.collegeName, p.graduationYear,
-      p.desiredRoles, p.opportunityType, p.workMode, p.preferredLocations,
-      p.skills.length ? "skills" : "", p.projects.length ? "projects" : "",
-      p.careerInterests, p.githubUrl, p.portfolioUrl
+      p.fullName, p.headline, p.educationLevel, p.careerInterests,
+      p.skills.length ? "skills" : ""
     ];
     var filled = values.filter(function (value) { return !!String(value || "").trim(); }).length;
     var total = values.length;
-    return Math.min(100, Math.max(0, Math.round((filled / total) * 100)));
+    return { percent: Math.round((filled / total) * 100), filled: filled, total: total };
+  }
+
+  function formatStudentApplicationDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Date not provided";
+    var parts = value.split("-").map(Number);
+    var date = new Date(parts[0], parts[1] - 1, parts[2]);
+    if (date.getFullYear() !== parts[0] || date.getMonth() !== parts[1] - 1 || date.getDate() !== parts[2]) return "Date not provided";
+    return date.toLocaleDateString();
+  }
+
+  function studentApplicationItemHtml(application, compact) {
+    return '<li class="student-application-item">' +
+      '<div class="student-application-item__content">' +
+        '<div class="student-application-item__heading"><strong>' + escapeHtml(application.jobTitle) + '</strong><span class="student-application-status">' + escapeHtml(application.status) + '</span></div>' +
+        '<span class="student-item__meta">' + escapeHtml(application.companyName) + ' · ' + escapeHtml(formatStudentApplicationDate(application.applicationDate)) + '</span>' +
+        '<span class="student-item__meta">Method/source: ' + escapeHtml(application.methodSource || "Not provided") + '</span>' +
+        '<span class="student-item__meta">Your status: entered by you · not synced with an employer</span>' +
+        (application.recruiterStatus ? '<span class="student-item__meta">Recruiter demo status: ' + escapeHtml(application.recruiterStatus) + (application.recruiterUpdatedAt ? ' · updated ' + escapeHtml(formatStudentApplicationDate(application.recruiterUpdatedAt.slice(0, 10))) : '') + ' · local only</span>' : '') +
+        (application.notes ? '<p class="student-application-item__notes">' + escapeHtml(application.notes) + '</p>' : '') +
+      '</div>' +
+      '<div class="student-application-item__actions">' +
+        '<button class="btn btn--text" type="button" data-student-application-edit="' + escapeHtml(application.id) + '">Edit</button>' +
+        (compact ? "" : '<button class="btn btn--text" type="button" data-student-application-delete="' + escapeHtml(application.id) + '">Remove</button>') +
+      '</div>' +
+    '</li>';
+  }
+
+  function renderStudentApplicationLists(profile) {
+    var applications = normalizeStudentProfile(profile || readDemoProfile()).applications.slice().sort(function (a, b) {
+      return (b.applicationDate || "").localeCompare(a.applicationDate || "") || (b.updatedAt || "").localeCompare(a.updatedAt || "");
+    });
+    if (studentApplications) {
+      studentApplications.innerHTML = applications.length
+        ? applications.slice(0, 3).map(function (application) { return studentApplicationItemHtml(application, true); }).join("")
+        : '<li class="empty--compact"><h3>No applications recorded</h3><p>Add an application after you have submitted it. Employer-site visits are not automatically recorded.</p><button class="btn btn--secondary" type="button" data-student-application-add>Add application</button></li>';
+    }
+    if (!studentApplicationList) return;
+    if (!applications.length) {
+      studentApplicationList.innerHTML = '<li class="empty--compact"><h3>No applications recorded</h3><p>Add an application after you have submitted it. Employer-site visits are not automatically recorded.</p></li>';
+      if (studentApplicationListMessage) studentApplicationListMessage.textContent = "";
+      return;
+    }
+    var statusFilter = document.getElementById("student-application-filter-status");
+    var searchFilter = document.getElementById("student-application-filter-search");
+    var selectedStatus = statusFilter ? statusFilter.value : "";
+    var query = searchFilter ? searchFilter.value.trim().toLowerCase() : "";
+    var filtered = applications.filter(function (application) {
+      var matchesStatus = !selectedStatus || application.status === selectedStatus;
+      var matchesQuery = !query || (application.jobTitle + " " + application.companyName).toLowerCase().indexOf(query) !== -1;
+      return matchesStatus && matchesQuery;
+    });
+    if (!filtered.length) {
+      studentApplicationList.innerHTML = '<li class="empty--compact"><h3>No matching applications</h3><p>Try another status or search term.</p></li>';
+      return;
+    }
+    studentApplicationList.innerHTML = filtered.map(function (application) {
+      return studentApplicationItemHtml(application, false);
+    }).join("");
   }
 
   function renderStudentDashboard() {
@@ -891,9 +1795,16 @@
     if (studentWelcomeName) {
       studentWelcomeName.textContent = name === "Student" ? "Student" : "Welcome back, " + name;
     }
-    var completionValue = calculateProfileCompletion(profile);
-    if (studentCompletionBar) studentCompletionBar.style.width = completionValue + "%";
-    if (studentCompletionValue) studentCompletionValue.textContent = completionValue + "%";
+    var completion = calculateProfileCompletion(profile);
+    if (studentCompletionBar) {
+      var completionFill = studentCompletionBar.querySelector("span");
+      if (completionFill) completionFill.style.width = completion.percent + "%";
+      studentCompletionBar.setAttribute("aria-valuenow", String(completion.percent));
+    }
+    if (studentCompletionValue) studentCompletionValue.textContent = completion.percent + "%";
+    if (studentCompletionDetail) studentCompletionDetail.textContent = completion.filled + " of " + completion.total + " core fields complete";
+    var profileNudge = document.getElementById("student-profile-nudge");
+    if (profileNudge) profileNudge.hidden = completion.percent === 100;
 
     var savedJobs = Array.isArray(saved) ? saved : [];
     var savedMatches = savedJobs.map(function (id) {
@@ -909,19 +1820,7 @@
       }
     }
 
-    if (studentApplications) {
-      var appStore = window.NexoraApplications && window.NexoraApplications.getStore ? window.NexoraApplications.getStore() : null;
-      var appList = appStore && typeof appStore.list === "function" ? appStore.list() : [];
-      if (!appList.length) {
-        studentApplications.innerHTML = '<li class="empty--compact"><h3>No applications yet</h3><p>NEXORA has not implemented application tracking yet, so this stays empty until a real backend exists.</p></li>';
-      } else {
-        studentApplications.innerHTML = appList.slice(0, 4).map(function (record) {
-          var job = Array.isArray(allJobs) ? allJobs.find(function (item) { return item && Number(item.id) === Number(record.jobId); }) : null;
-          var label = job ? job.title : "Application";
-          return '<li class="student-item"><strong>' + escapeHtml(label) + '</strong><span class="student-item__meta">Status: ' + escapeHtml(record.status || "Recorded") + '</span></li>';
-        }).join("");
-      }
-    }
+    renderStudentApplicationLists(profile);
 
     if (studentOverview) {
       var skillsHtml = profile.skills.length ? profile.skills.map(function (skill) {
@@ -931,7 +1830,10 @@
       }).join("") : '<li class="empty--compact"><h3>No skills added yet</h3><p>Add a few skills to help employers understand your strengths.</p></li>';
 
       var projectsHtml = profile.projects.length ? profile.projects.map(function (project) {
-        return '<li class="student-item"><strong>' + escapeHtml(project.title) + '</strong><span class="student-item__meta">Role: ' + escapeHtml(project.role || "Not provided") + '</span><span class="student-item__meta">' + escapeHtml(project.description || "No description provided") + '</span></li>';
+        var projectLinks = [];
+        if (project.githubUrl && isHttpUrl(project.githubUrl)) projectLinks.push('<a class="link" href="' + escapeHtml(project.githubUrl) + '" target="_blank" rel="noopener noreferrer">Repository link provided</a>');
+        if (project.liveDemoUrl && isHttpUrl(project.liveDemoUrl)) projectLinks.push('<a class="link" href="' + escapeHtml(project.liveDemoUrl) + '" target="_blank" rel="noopener noreferrer">Live demo</a>');
+        return '<li class="student-item"><strong>' + escapeHtml(project.title) + '</strong><span class="student-item__meta">' + escapeHtml(project.description || "No description provided") + '</span><span class="student-item__meta">Technologies: ' + escapeHtml(project.technologies || "Not provided") + '</span><span class="student-item__meta">Role: ' + escapeHtml(project.role || "Not provided") + '</span><span class="student-item__meta">Project added by student</span>' + (projectLinks.length ? '<div class="student-project-item__links">' + projectLinks.join("") + '</div>' : '') + '</li>';
       }).join("") : '<li class="empty--compact"><h3>No proof-of-work projects yet</h3><p>Share important work samples and project outcomes.</p></li>';
 
       studentOverview.innerHTML = '<div class="student-overview__section"><h4>Skills</h4><ul class="student-list">' + skillsHtml + '</ul></div>' +
@@ -953,16 +1855,256 @@
           return '<dt>' + escapeHtml(entry[0]) + '</dt><dd>' + escapeHtml(entry[1]) + '</dd>';
         }).join("") + '</dl>';
     }
+    renderSkillGapAnalyzer();
+    renderRecruiterApplicants(readRecruiterListings());
   }
 
   function loadStudentProfileIntoForm() {
+    clearStudentSkillForm();
     setStudentInputs(readDemoProfile());
+    if (studentProfileForm) {
+      studentProfileForm.querySelectorAll("[aria-invalid]").forEach(function (el) {
+        el.setAttribute("aria-invalid", "false");
+      });
+      studentProfileForm.querySelectorAll(".field-error").forEach(function (el) { el.textContent = ""; });
+    }
+    setStudentStatus("");
     renderProjectOptions();
+  }
+
+  function setStudentApplicationMessage(message, isError) {
+    if (!studentApplicationMessage) return;
+    studentApplicationMessage.textContent = message || "";
+    studentApplicationMessage.classList.toggle("field-error", !!(message && isError));
+    studentApplicationMessage.classList.toggle("auth-status", !(message && isError));
+  }
+
+  function clearStudentApplicationErrors() {
+    ["student-application-title", "student-application-company", "student-application-date", "student-application-source", "student-application-status"].forEach(function (id) {
+      setFieldError(id, "");
+    });
+  }
+
+  function renderStudentApplicationJobOptions(selectedId, existingApplication) {
+    var select = document.getElementById("student-application-job");
+    if (!select) return;
+    select.textContent = "";
+    var manual = document.createElement("option");
+    manual.value = "";
+    manual.textContent = "Manual entry (not linked to a listing)";
+    select.appendChild(manual);
+    (Array.isArray(allJobs) ? allJobs : []).forEach(function (job) {
+      var option = document.createElement("option");
+      option.value = String(job.id);
+      option.textContent = job.title + " · " + job.company + (job.status === "DEMO" ? " · demo sample" : "");
+      select.appendChild(option);
+    });
+    if (selectedId && !Array.prototype.some.call(select.options, function (option) { return option.value === String(selectedId); }) && existingApplication) {
+      var unavailable = document.createElement("option");
+      unavailable.value = String(selectedId);
+      unavailable.textContent = "Previously linked listing unavailable · saved job details retained";
+      select.appendChild(unavailable);
+    }
+    select.value = selectedId && Array.prototype.some.call(select.options, function (option) { return option.value === String(selectedId); })
+      ? String(selectedId)
+      : "";
+  }
+
+  function updateStudentApplicationJobFields() {
+    var select = document.getElementById("student-application-job");
+    var title = document.getElementById("student-application-title");
+    var company = document.getElementById("student-application-company");
+    if (!select || !title || !company) return;
+    var job = select.value && Array.isArray(allJobs)
+      ? allJobs.find(function (item) { return String(item.id) === select.value; })
+      : null;
+    title.readOnly = !!job;
+    company.readOnly = !!job;
+    if (job) {
+      title.value = job.title;
+      company.value = job.company;
+    }
+  }
+
+  function resetStudentApplicationForm() {
+    if (!studentApplicationForm) return;
+    studentApplicationForm.reset();
+    studentApplicationDraftId = null;
+    renderStudentApplicationJobOptions("");
+    updateStudentApplicationJobFields();
+    document.getElementById("student-application-save").textContent = "Save application";
+    studentApplicationForm.hidden = true;
+    clearStudentApplicationErrors();
+    setStudentApplicationMessage("");
+    if (studentApplicationDuplicateEdit) {
+      studentApplicationDuplicateEdit.hidden = true;
+      studentApplicationDuplicateEdit.dataset.studentApplicationDuplicateEdit = "";
+    }
+  }
+
+  function openStudentApplicationForm(applicationId, jobId, markApplied) {
+    if (!studentApplicationForm) return;
+    var profile = normalizeStudentProfile(readDemoProfile());
+    var existing = applicationId ? profile.applications.find(function (item) { return item.id === applicationId; }) : null;
+    studentApplicationDraftId = existing ? existing.id : null;
+    studentApplicationForm.hidden = false;
+    clearStudentApplicationErrors();
+    setStudentApplicationMessage("");
+    if (studentApplicationDuplicateEdit) studentApplicationDuplicateEdit.hidden = true;
+    renderStudentApplicationJobOptions(existing ? existing.jobId : jobId, existing);
+    document.getElementById("student-application-title").value = existing ? existing.jobTitle : "";
+    document.getElementById("student-application-company").value = existing ? existing.companyName : "";
+    document.getElementById("student-application-date").value = existing ? existing.applicationDate : "";
+    document.getElementById("student-application-source").value = existing ? existing.methodSource : "";
+    document.getElementById("student-application-status").value = existing ? existing.status : (markApplied ? "Applied" : "");
+    document.getElementById("student-application-notes").value = existing ? existing.notes : "";
+    updateStudentApplicationJobFields();
+    if (existing && !document.getElementById("student-application-job").value) {
+      document.getElementById("student-application-title").value = existing.jobTitle;
+      document.getElementById("student-application-company").value = existing.companyName;
+    }
+    document.getElementById("student-application-save").textContent = existing ? "Save changes" : "Save application";
+    showStudentRoute("applications");
+    if (markApplied && !existing) {
+      setStudentApplicationMessage("Record this only if you have submitted the application. The status is your entry and is not confirmed by the employer.");
+    }
+    var focusTarget = existing ? document.getElementById("student-application-status") : document.getElementById("student-application-title");
+    if (jobId && markApplied) focusTarget = document.getElementById("student-application-date");
+    if (focusTarget) focusTarget.focus();
+  }
+
+  function normalizedApplicationIdentity(value) {
+    return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function findDuplicateStudentApplication(profile, candidate, excludedId) {
+    return profile.applications.find(function (application) {
+      if (application.id === excludedId) return false;
+      if (candidate.jobId && application.jobId) return candidate.jobId === application.jobId;
+      return normalizedApplicationIdentity(application.jobTitle) === normalizedApplicationIdentity(candidate.jobTitle) &&
+        normalizedApplicationIdentity(application.companyName) === normalizedApplicationIdentity(candidate.companyName);
+    }) || null;
+  }
+
+  function validateStudentApplicationForm() {
+    var title = document.getElementById("student-application-title").value.trim();
+    var company = document.getElementById("student-application-company").value.trim();
+    var dateValue = document.getElementById("student-application-date").value;
+    var source = document.getElementById("student-application-source").value.trim();
+    var status = document.getElementById("student-application-status").value;
+    var errors = {};
+    if (!title) errors["student-application-title"] = "Enter the job title.";
+    if (!company) errors["student-application-company"] = "Enter the company.";
+    var validDate = /^\d{4}-\d{2}-\d{2}$/.test(dateValue) && formatStudentApplicationDate(dateValue) !== "Date not provided";
+    var today = new Date();
+    var todayValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+    if (!validDate) errors["student-application-date"] = "Choose a valid application date.";
+    else if (dateValue > todayValue) errors["student-application-date"] = "Application date cannot be in the future.";
+    if (!source) errors["student-application-source"] = "Enter how or where you applied.";
+    if (studentApplicationStatuses.indexOf(status) === -1) errors["student-application-status"] = "Choose a status you maintain.";
+    ["student-application-title", "student-application-company", "student-application-date", "student-application-source", "student-application-status"].forEach(function (id) {
+      setFieldError(id, errors[id] || "");
+    });
+    var firstInvalid = Object.keys(errors)[0];
+    if (firstInvalid) document.getElementById(firstInvalid).focus();
+    return Object.keys(errors).length === 0;
+  }
+
+  function saveStudentApplication(event) {
+    if (event) event.preventDefault();
+    if (!validateStudentApplicationForm()) {
+      setStudentApplicationMessage("Please correct the highlighted fields before saving.", true);
+      return;
+    }
+    var profile = readDemoProfile();
+    var normalized = normalizeStudentProfile(profile);
+    var jobSelect = document.getElementById("student-application-job");
+    var record = {
+      id: studentApplicationDraftId || "application_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      jobId: jobSelect ? jobSelect.value : "",
+      jobTitle: document.getElementById("student-application-title").value.trim(),
+      companyName: document.getElementById("student-application-company").value.trim(),
+      applicationDate: document.getElementById("student-application-date").value,
+      methodSource: document.getElementById("student-application-source").value.trim(),
+      status: document.getElementById("student-application-status").value,
+      notes: document.getElementById("student-application-notes").value.trim(),
+      createdAt: "",
+      updatedAt: new Date().toISOString(),
+      statusSource: "student",
+      candidateId: normalized.profileId || "",
+      recruiterListingId: ""
+    };
+    var selectedJob = record.jobId ? allJobs.filter(function (job) { return String(job.id) === record.jobId; })[0] : null;
+    if (selectedJob && selectedJob.recruiterListingId) record.recruiterListingId = selectedJob.recruiterListingId;
+    var existingApplication = studentApplicationDraftId && normalized.applications.find(function (application) { return application.id === studentApplicationDraftId; });
+    if (existingApplication) {
+      record.recruiterListingId = existingApplication.recruiterListingId || record.recruiterListingId;
+      record.candidateId = existingApplication.candidateId || record.candidateId;
+      record.recruiterStatus = existingApplication.recruiterStatus;
+      record.recruiterUpdatedAt = existingApplication.recruiterUpdatedAt;
+    }
+    if (!profile.profileId) {
+      profile.profileId = "candidate_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      record.candidateId = profile.profileId;
+    } else if (!record.candidateId) {
+      record.candidateId = profile.profileId;
+    }
+    var duplicate = findDuplicateStudentApplication(normalized, record, studentApplicationDraftId);
+    if (duplicate) {
+      setStudentApplicationMessage("This job already has an application record. Edit that record instead of creating a duplicate.", true);
+      if (studentApplicationDuplicateEdit) {
+        studentApplicationDuplicateEdit.hidden = false;
+        studentApplicationDuplicateEdit.dataset.studentApplicationDuplicateEdit = duplicate.id;
+        studentApplicationDuplicateEdit.textContent = "Edit existing application for " + duplicate.jobTitle;
+      }
+      return;
+    }
+    if (studentApplicationDraftId) {
+      var original = existingApplication;
+      record.createdAt = original ? original.createdAt : "";
+      normalized.applications = normalized.applications.map(function (application) {
+        return application.id === studentApplicationDraftId ? record : application;
+      });
+    } else {
+      record.createdAt = record.updatedAt;
+      normalized.applications.push(record);
+    }
+    normalized.applications.forEach(function (application) {
+      if (!application.candidateId) application.candidateId = profile.profileId;
+    });
+    profile.applications = normalized.applications;
+    profile.updatedAt = record.updatedAt;
+    if (!writeDemoProfile(profile)) {
+      setStudentApplicationMessage("Could not save application data in this browser. Check local storage settings and try again.", true);
+      return;
+    }
+    resetStudentApplicationForm();
+    renderStudentApplicationLists(normalized);
+    renderStudentDashboard();
+    setStudentApplicationMessage("");
+    if (studentApplicationListMessage) studentApplicationListMessage.textContent = "Application saved in this browser-local demo profile.";
+  }
+
+  function deleteStudentApplication(applicationId) {
+    var profile = readDemoProfile();
+    var normalized = normalizeStudentProfile(profile);
+    var application = normalized.applications.find(function (item) { return item.id === applicationId; });
+    if (!application || !window.confirm('Remove the application record for "' + application.jobTitle + '" at ' + application.companyName + '?')) return;
+    normalized.applications = normalized.applications.filter(function (item) { return item.id !== applicationId; });
+    profile.applications = normalized.applications;
+    profile.updatedAt = new Date().toISOString();
+    if (!writeDemoProfile(profile)) {
+      if (studentApplicationListMessage) studentApplicationListMessage.textContent = "Could not remove the application from this browser. Check local storage settings and try again.";
+      return;
+    }
+    if (studentApplicationDraftId === applicationId) resetStudentApplicationForm();
+    renderStudentApplicationLists(normalized);
+    renderStudentDashboard();
+    if (studentApplicationListMessage) studentApplicationListMessage.textContent = "Application record removed from this browser.";
   }
 
   function saveStudentProfileFromForm() {
     var profile = readDemoProfile();
-    profile = profile && typeof profile === "object" ? profile : {};
     profile.fullName = document.getElementById("student-profile-name").value.trim();
     profile.headline = document.getElementById("student-profile-headline").value.trim();
     profile.educationLevel = document.getElementById("student-profile-education").value;
@@ -975,8 +2117,9 @@
     profile.careerInterests = document.getElementById("student-profile-interests").value.trim();
     profile.githubUrl = document.getElementById("student-profile-github").value.trim();
     profile.portfolioUrl = document.getElementById("student-profile-portfolio").value.trim();
-    profile.skills = normalizeStudentProfile(readDemoProfile()).skills;
-    profile.projects = normalizeStudentProfile(readDemoProfile()).projects;
+    var currentProfile = normalizeStudentProfile(profile);
+    profile.skills = currentProfile.skills;
+    profile.projects = currentProfile.projects;
     profile.updatedAt = new Date().toISOString();
 
     var errors = studentFieldErrorMap(profile);
@@ -985,8 +2128,16 @@
       setStudentStatus("Please fix the highlighted fields and try again.");
       return false;
     }
-    writeDemoProfile(profile);
+    studentProfileForm.querySelectorAll("[aria-invalid]").forEach(function (el) {
+      el.setAttribute("aria-invalid", "false");
+    });
+    studentProfileForm.querySelectorAll(".field-error").forEach(function (el) { el.textContent = ""; });
+    if (!writeDemoProfile(profile)) {
+      setStudentStatus("Could not save profile changes in this browser. Check local storage settings and try again.");
+      return false;
+    }
     setStudentStatus("Profile saved successfully. Your dashboard reflects the latest local data.");
+    if (studentDashboardStatus) studentDashboardStatus.textContent = "";
     renderStudentDashboard();
     return true;
   }
@@ -997,7 +2148,16 @@
     var level = document.getElementById("student-skill-level").value;
     var projectId = document.getElementById("student-skill-project").value;
     if (!name) {
-      setFieldError("student-skill-name", "Add a skill name before saving.");
+      setStudentSkillMessage("Enter a skill name before saving.", true);
+      document.getElementById("student-skill-name").focus();
+      return;
+    }
+    var duplicate = profile.skills.find(function (item) {
+      return item.id !== studentSkillDraftId && item.name.toLowerCase() === name.toLowerCase();
+    });
+    if (duplicate) {
+      setStudentSkillMessage("That skill is already in your profile. Skill names must be unique.", true);
+      document.getElementById("student-skill-name").focus();
       return;
     }
     var skillRecord = {
@@ -1014,7 +2174,12 @@
       profile.skills.push(skillRecord);
     }
     profile.updatedAt = new Date().toISOString();
-    writeDemoProfile(profile);
+    if (!writeDemoProfile(profile)) {
+      setStudentSkillMessage("Could not save this skill in the browser. Check local storage settings and try again.", true);
+      return;
+    }
+    var message = studentSkillDraftId ? "Skill updated in your browser-local profile." : "Skill added to your browser-local profile.";
+    setStudentStatus(message);
     clearStudentSkillForm();
     renderProjectOptions();
     renderStudentSkillEditor();
@@ -1025,7 +2190,11 @@
     var profile = normalizeStudentProfile(readDemoProfile());
     profile.skills = profile.skills.filter(function (item) { return item.id !== skillId; });
     profile.updatedAt = new Date().toISOString();
-    writeDemoProfile(profile);
+    if (!writeDemoProfile(profile)) {
+      setStudentSkillMessage("Could not save the skill removal in the browser. Check local storage settings and try again.", true);
+      return;
+    }
+    setStudentStatus("Skill removed from your browser-local profile.");
     renderStudentSkillEditor();
     renderStudentDashboard();
   }
@@ -1038,11 +2207,25 @@
     var skillLevel = document.getElementById("student-skill-level");
     var skillProject = document.getElementById("student-skill-project");
     if (skillName) skillName.value = skill.name;
-    if (skillLevel) skillLevel.value = skill.level || "";
+    if (skillLevel) {
+      var previousSavedLevel = skillLevel.querySelector("[data-saved-level]");
+      if (previousSavedLevel) previousSavedLevel.remove();
+      var existingLevel = Array.prototype.some.call(skillLevel.options, function (option) { return option.value === skill.level; });
+      if (skill.level && !existingLevel) {
+        var savedLevelOption = document.createElement("option");
+        savedLevelOption.value = skill.level;
+        savedLevelOption.dataset.savedLevel = "true";
+        savedLevelOption.textContent = "Saved level: " + skill.level;
+        skillLevel.insertBefore(savedLevelOption, skillLevel.options[1] || null);
+      }
+      skillLevel.value = skill.level || "";
+    }
     if (skillProject) skillProject.value = skill.projectId || "";
     studentSkillDraftId = skillId;
     var addButton = document.getElementById("student-skill-add");
     if (addButton) addButton.textContent = "Save skill";
+    setStudentSkillMessage("Editing " + skill.name + ". Save your changes or enter a different skill.", false);
+    if (skillName) skillName.focus();
   }
 
   function validateProjectForm() {
@@ -1059,13 +2242,20 @@
     if (!role) errors["student-project-role"] = "Please enter the role you played.";
     if (github && !isHttpUrl(github)) errors["student-project-github"] = "Use a valid http(s) URL.";
     if (demo && !isHttpUrl(demo)) errors["student-project-demo"] = "Use a valid http(s) URL.";
-    Object.keys(errors).forEach(function (key) { setFieldError(key, errors[key]); });
+    ["student-project-title", "student-project-description", "student-project-technologies", "student-project-role", "student-project-github", "student-project-demo"].forEach(function (id) {
+      setFieldError(id, errors[id] || "");
+    });
+    var firstInvalid = Object.keys(errors)[0];
+    if (firstInvalid) {
+      var invalidInput = document.getElementById(firstInvalid);
+      if (invalidInput) invalidInput.focus();
+    }
     return Object.keys(errors).length === 0;
   }
 
   function addProjectToProfile() {
     if (!validateProjectForm()) {
-      setFieldError("student-project-error", "Please fix the highlighted fields.");
+      setStudentProjectMessage("Please fix the highlighted fields before saving.", true);
       return;
     }
     var profile = normalizeStudentProfile(readDemoProfile());
@@ -1090,7 +2280,11 @@
       return skill;
     });
     profile.updatedAt = new Date().toISOString();
-    writeDemoProfile(profile);
+    if (!writeDemoProfile(profile)) {
+      setStudentProjectMessage("Could not save this project in the browser. Check local storage settings and try again.", true);
+      return;
+    }
+    setStudentStatus(studentProjectDraftId ? "Project updated in your browser-local profile." : "Project added to your browser-local profile.");
     clearStudentProjectForm();
     renderStudentProjectEditor();
     renderStudentSkillEditor();
@@ -1100,6 +2294,8 @@
 
   function deleteProjectFromProfile(projectId) {
     var profile = normalizeStudentProfile(readDemoProfile());
+    var project = profile.projects.find(function (item) { return item.id === projectId; });
+    if (!project || !window.confirm('Delete "' + project.title + '" from your profile? This cannot be undone.')) return;
     profile.projects = profile.projects.filter(function (item) { return item.id !== projectId; });
     profile.skills = profile.skills.map(function (skill) {
       if (skill.projectId === projectId) {
@@ -1108,7 +2304,11 @@
       return skill;
     });
     profile.updatedAt = new Date().toISOString();
-    writeDemoProfile(profile);
+    if (!writeDemoProfile(profile)) {
+      setStudentStatus("Could not save the project removal in the browser. Check local storage settings and try again.");
+      return;
+    }
+    setStudentStatus("Project removed from your browser-local profile.");
     renderStudentProjectEditor();
     renderStudentSkillEditor();
     renderProjectOptions();
@@ -1133,6 +2333,11 @@
     studentProjectDraftId = projectId;
     var saveButton = document.getElementById("student-project-save");
     if (saveButton) saveButton.textContent = "Save project";
+    var clearButton = document.getElementById("student-project-clear");
+    if (clearButton) clearButton.textContent = "Cancel editing";
+    setStudentProjectMessage("Editing " + project.title + ". Save your changes or clear the form to cancel.");
+    var titleInput = document.getElementById("student-project-title");
+    if (titleInput) titleInput.focus();
   }
 
   function submitStudentProfileForm() {
@@ -1147,15 +2352,43 @@
       submitStudentProfileForm();
     });
   }
+  if (studentApplicationForm) studentApplicationForm.addEventListener("submit", saveStudentApplication);
+  var studentApplicationAdd = document.getElementById("student-application-add");
+  if (studentApplicationAdd) studentApplicationAdd.addEventListener("click", function () {
+    openStudentApplicationForm("", "", false);
+  });
+  var studentApplicationCancel = document.getElementById("student-application-cancel");
+  if (studentApplicationCancel) studentApplicationCancel.addEventListener("click", resetStudentApplicationForm);
+  var studentApplicationJob = document.getElementById("student-application-job");
+  if (studentApplicationJob) studentApplicationJob.addEventListener("change", updateStudentApplicationJobFields);
+  var studentApplicationStatusFilter = document.getElementById("student-application-filter-status");
+  var studentApplicationSearch = document.getElementById("student-application-filter-search");
+  if (studentApplicationStatusFilter) studentApplicationStatusFilter.addEventListener("change", function () { renderStudentApplicationLists(); });
+  if (studentApplicationSearch) studentApplicationSearch.addEventListener("input", function () { renderStudentApplicationLists(); });
+  var studentProfileCancel = document.getElementById("student-profile-cancel");
+  if (studentProfileCancel) {
+    studentProfileCancel.addEventListener("click", function () {
+      loadStudentProfileIntoForm();
+      setStudentStatus("");
+      if (studentDashboardStatus) studentDashboardStatus.textContent = "";
+      showStudentRoute("dashboard");
+      renderStudentDashboard();
+    });
+  }
 
   /* ---------- Recruiter portal (browser-local demo only) ---------- */
   var RECRUITER_LISTINGS_KEY = "nexora:demo-recruiter-listings";
+  var COMPANY_PROFILE_KEY = "nexora:demo-company-profile";
+  var JOB_REPORTS_KEY = "nexora:demo-job-reports";
+  var RECRUITER_REVIEW_WINDOW_MS = 15 * 24 * 60 * 60 * 1000;
   var recruiterForm = document.getElementById("recruiter-listing-form");
   var recruiterFormStatus = document.getElementById("recruiter-form-status");
   var recruiterListingDraftId = null;
+  var recruiterSaving = false;
   var recruiterFieldIds = [
     "recruiter-job-title", "recruiter-company", "recruiter-description", "recruiter-location",
-    "recruiter-job-type", "recruiter-work-mode", "recruiter-skills", "recruiter-apply-url", "recruiter-status"
+    "recruiter-job-type", "recruiter-work-mode", "recruiter-skills", "recruiter-eligibility",
+    "recruiter-experience", "recruiter-deadline", "recruiter-salary-min", "recruiter-apply-url"
   ];
 
   function setRecruiterStatus(message) {
@@ -1164,12 +2397,280 @@
     if (listingStatus) listingStatus.textContent = message || "";
   }
 
+  function normalizeCompanyProfile(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    var status = ["Pending Review", "Rejected"].indexOf(value.verificationStatus) >= 0 ? value.verificationStatus : "Not Submitted";
+    var website = String(value.website || "").trim();
+    if (website && !isHttpUrl(website)) website = "";
+    var publicLinks = Array.isArray(value.publicLinks) ? value.publicLinks : [];
+    return {
+      id: String(value.id || ""),
+      companyName: String(value.companyName || "").trim(),
+      website: website,
+      emailDomain: String(value.emailDomain || "").trim().toLowerCase(),
+      description: String(value.description || "").trim(),
+      industry: String(value.industry || "").trim(),
+      location: String(value.location || "").trim(),
+      publicLinks: publicLinks.filter(isHttpUrl).slice(0, 10),
+      supportingInfo: String(value.supportingInfo || "").trim(),
+      verificationStatus: status,
+      submittedAt: String(value.submittedAt || ""),
+      reviewerFeedback: String(value.reviewerFeedback || "").trim()
+    };
+  }
+
+  function readCompanyProfile() {
+    try {
+      var raw = window.localStorage.getItem(COMPANY_PROFILE_KEY);
+      if (raw === null) return { profile: null, error: "" };
+      var parsed = JSON.parse(raw);
+      var profile = normalizeCompanyProfile(parsed);
+      if (!profile) return { profile: null, error: "Company profile data is malformed and was not changed." };
+      return { profile: profile, error: "" };
+    } catch (error) {
+      return { profile: null, error: "Company profile could not be read from this browser. No data was changed." };
+    }
+  }
+
+  function companyTrustForName(name) {
+    var result = readCompanyProfile();
+    var profile = result.profile;
+    if (!profile || !name || profile.companyName.toLowerCase() !== String(name).trim().toLowerCase()) {
+      return { status: "Not Submitted", profile: null };
+    }
+    return { status: profile.verificationStatus, profile: profile };
+  }
+
+  function readJobReports() {
+    try {
+      var raw = window.localStorage.getItem(JOB_REPORTS_KEY);
+      if (raw === null) return { reports: [], error: "" };
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return { reports: [], error: "Saved reports are malformed and were not changed." };
+      if (parsed.some(function (report) {
+        return !report || typeof report !== "object" || !report.id || !report.jobId || !report.reason || !report.timestamp;
+      })) return { reports: [], error: "Saved reports contain malformed records and were not changed." };
+      return { reports: parsed, error: "" };
+    } catch (error) {
+      return { reports: [], error: "Reports could not be read from this browser. No data was changed." };
+    }
+  }
+
+  function openJobReportForm(job, button) {
+    var existing = $("#jv-report-form", jobView);
+    if (existing) {
+      existing.hidden = !existing.hidden;
+      if (button) button.setAttribute("aria-expanded", String(!existing.hidden));
+      if (!existing.hidden) $("#jv-report-reason", existing).focus();
+      return;
+    }
+    var form = el("form", "jv__report-form");
+    form.id = "jv-report-form";
+    form.noValidate = true;
+    var heading = el("h3", null, "Report this job or recruiter");
+    form.appendChild(heading);
+    form.appendChild(el("p", "jv__missing", "Reports are saved only in this browser and are not automatically reviewed or resolved."));
+    var reasonLabel = el("label", null, "Reason for report");
+    reasonLabel.htmlFor = "jv-report-reason";
+    form.appendChild(reasonLabel);
+    var reason = el("select", "select");
+    reason.id = "jv-report-reason";
+    reason.required = true;
+    reason.appendChild(new Option("Choose a reason", ""));
+    ["Suspected scam", "Payment requested", "Misleading description", "Impersonation", "Suspicious external link", "Other concern"].forEach(function (name) {
+      reason.appendChild(new Option(name, name));
+    });
+    form.appendChild(reason);
+    var explanationLabel = el("label", null, "Additional details (optional)");
+    explanationLabel.htmlFor = "jv-report-explanation";
+    form.appendChild(explanationLabel);
+    var explanation = el("textarea", "input");
+    explanation.id = "jv-report-explanation";
+    explanation.rows = 3;
+    explanation.maxLength = 1000;
+    form.appendChild(explanation);
+    var error = el("p", "field-error");
+    error.id = "jv-report-error";
+    error.setAttribute("role", "status");
+    form.appendChild(error);
+    var submit = el("button", "btn btn--secondary", "Record report");
+    submit.type = "button";
+    submit.dataset.action = "report-submit";
+    form.appendChild(submit);
+    jobView.insertBefore(form, $("#jv-status", jobView));
+    if (button) button.setAttribute("aria-expanded", "true");
+    reason.focus();
+  }
+
+  function saveJobReport(job) {
+    var form = $("#jv-report-form", jobView);
+    var reason = $("#jv-report-reason", form);
+    var explanation = $("#jv-report-explanation", form);
+    var error = $("#jv-report-error", form);
+    if (!reason || !reason.value) {
+      if (error) error.textContent = "Choose a reason before recording the report.";
+      if (reason) reason.focus();
+      return;
+    }
+    var stored = readJobReports();
+    if (stored.error) {
+      if (error) error.textContent = stored.error;
+      return;
+    }
+    if (stored.reports.some(function (report) {
+      return String(report.jobId) === String(job.id) && report.reason === reason.value;
+    })) {
+      if (error) error.textContent = "A report with this reason is already recorded for this job in this browser.";
+      return;
+    }
+    var reports = stored.reports.concat([{
+      id: "report_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      jobId: String(job.id),
+      recruiterListingId: String(job.recruiterListingId || ""),
+      companyId: String(job.companyProfileId || ""),
+      companyName: String(job.company || ""),
+      jobTitle: String(job.title || ""),
+      reason: reason.value,
+      explanation: explanation ? explanation.value.trim() : "",
+      timestamp: new Date().toISOString(),
+      status: "Submitted"
+    }]);
+    try {
+      window.localStorage.setItem(JOB_REPORTS_KEY, JSON.stringify(reports));
+    } catch (storageError) {
+      if (error) error.textContent = "Report could not be saved in this browser. Check storage and try again.";
+      return;
+    }
+    if (error) error.textContent = "Report recorded locally. It has not been reviewed or resolved.";
+    setStatus("Your report is recorded in this browser only; no review or resolution is implied.");
+    var submit = $('[data-action="report-submit"]', form);
+    if (submit) submit.disabled = true;
+  }
+
+  function companyProfileFormData() {
+    var current = readCompanyProfile();
+    var old = current.profile || {};
+    var linksText = document.getElementById("company-profile-links").value.trim();
+    return {
+      id: old.id || "company_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      companyName: document.getElementById("company-profile-name").value.trim(),
+      website: document.getElementById("company-profile-website").value.trim(),
+      emailDomain: document.getElementById("company-profile-domain").value.trim().toLowerCase(),
+      industry: document.getElementById("company-profile-industry").value.trim(),
+      location: document.getElementById("company-profile-location").value.trim(),
+      description: document.getElementById("company-profile-description").value.trim(),
+      publicLinks: linksText ? linksText.split(",").map(function (link) { return link.trim(); }).filter(Boolean) : [],
+      supportingInfo: document.getElementById("company-profile-support").value.trim(),
+      verificationStatus: old.verificationStatus || "Not Submitted",
+      submittedAt: old.submittedAt || "",
+      reviewerFeedback: old.reviewerFeedback || ""
+    };
+  }
+
+  function companyProfileErrors(profile, requireVerificationDetails) {
+    var errors = {};
+    if (!profile.companyName) errors["company-profile-name"] = "Enter the company name.";
+    if ((requireVerificationDetails && !profile.website) || (profile.website && !isHttpUrl(profile.website))) {
+      errors["company-profile-website"] = "Enter a valid official HTTP or HTTPS website URL.";
+    }
+    if ((requireVerificationDetails && !profile.emailDomain) ||
+        (profile.emailDomain && !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(profile.emailDomain))) {
+      errors["company-profile-domain"] = "Enter a business email domain such as example.com, without an @.";
+    }
+    if (profile.publicLinks.some(function (link) { return !isHttpUrl(link); })) errors["company-profile-links"] = "Each public link must be a valid HTTP or HTTPS URL.";
+    return errors;
+  }
+
+  function renderCompanyTrustCenter() {
+    var result = readCompanyProfile();
+    var form = document.getElementById("company-profile-form");
+    if (!form) return;
+    if (result.error) {
+      document.getElementById("company-profile-message").textContent = result.error;
+      document.getElementById("company-verification-status").textContent = "Unavailable";
+      document.getElementById("company-verification-explanation").textContent = "Saved company data could not be read safely.";
+      return;
+    }
+    var profile = result.profile;
+    if (profile) {
+      [
+        ["company-profile-name", profile.companyName], ["company-profile-website", profile.website],
+        ["company-profile-domain", profile.emailDomain], ["company-profile-industry", profile.industry],
+        ["company-profile-location", profile.location], ["company-profile-description", profile.description],
+        ["company-profile-links", profile.publicLinks.join(", ")], ["company-profile-support", profile.supportingInfo]
+      ].forEach(function (pair) { document.getElementById(pair[0]).value = pair[1] || ""; });
+    }
+    var status = profile ? profile.verificationStatus : "Not Submitted";
+    var statusBadge = document.getElementById("company-verification-status");
+    statusBadge.textContent = status;
+    statusBadge.className = "recruiter-status recruiter-status--" +
+      (status === "Pending Review" ? "pending" : status === "Rejected" ? "rejected" : "unpublished");
+    var submitted = document.getElementById("company-submission-date");
+    submitted.hidden = !profile || !validRecruiterTimestamp(profile.submittedAt);
+    submitted.textContent = submitted.hidden ? "" : "Request submitted: " + formatRecruiterDate(profile.submittedAt);
+    document.getElementById("company-verification-explanation").textContent = {
+      "Not Submitted": "No verification request has been submitted. Company information is provided by the recruiter and is not independently checked.",
+      "Pending Review": "A demo request was saved locally. No authorized reviewer or verification process is connected, so this is not an approval.",
+      "Rejected": "The browser-local record is marked Rejected. This demo cannot verify that a reviewer made this decision. Update the information and resubmit if appropriate."
+    }[status];
+    document.getElementById("company-reviewer-feedback").textContent = profile && profile.reviewerFeedback
+      ? profile.reviewerFeedback
+      : "No reviewer feedback is available.";
+    document.getElementById("company-profile-message").textContent = "";
+  }
+
+  function saveCompanyProfile(submitRequest) {
+    var current = readCompanyProfile();
+    if (current.error) {
+      document.getElementById("company-profile-message").textContent = current.error;
+      return;
+    }
+    var profile = companyProfileFormData();
+    var errors = companyProfileErrors(profile, submitRequest);
+    ["company-profile-name", "company-profile-website", "company-profile-domain", "company-profile-links"].forEach(function (id) {
+      setFieldError(id, errors[id] || "");
+    });
+    if (Object.keys(errors).length) {
+      document.getElementById("company-profile-message").textContent = submitRequest
+        ? "Complete the company name, official website and business email domain, and fix any invalid public links before submitting."
+        : "Enter a company name and fix any invalid website, email domain, or public links before saving.";
+      var first = document.getElementById(Object.keys(errors)[0]);
+      if (first) first.focus();
+      return;
+    }
+    if (submitRequest) {
+      if (!window.confirm("Submit this company information as a local demo verification request? It will remain Pending Review and is not reviewed or verified by NEXORA.")) return;
+      profile.verificationStatus = "Pending Review";
+      profile.submittedAt = new Date().toISOString();
+      profile.reviewerFeedback = "";
+    }
+    try {
+      window.localStorage.setItem(COMPANY_PROFILE_KEY, JSON.stringify(profile));
+    } catch (error) {
+      document.getElementById("company-profile-message").textContent = "Company profile could not be saved in this browser. Check storage and try again.";
+      return;
+    }
+    renderCompanyTrustCenter();
+    document.getElementById("company-profile-message").textContent = submitRequest
+      ? "Demo verification request saved locally as Pending Review. No reviewer was notified."
+      : "Company profile saved in this browser.";
+    refreshPublishedJobs();
+  }
+
   function normalizeRecruiterListings(value) {
     if (!Array.isArray(value)) return null;
-    return value.map(function (listing) {
+    var normalized = value.map(function (listing) {
       var item = listing && typeof listing === "object" ? listing : {};
-      var status = ["Draft", "Published", "Closed"].indexOf(item.status) >= 0 ? item.status : "Draft";
+      var status = ["Draft", "Published", "Closed", "Unpublished", "Expired"].indexOf(item.status) >= 0 ? item.status : "Draft";
       var skills = Array.isArray(item.requiredSkills) ? item.requiredSkills : String(item.requiredSkills || "").split(",");
+      var applyUrl = String(item.applyUrl || "").trim();
+      if (applyUrl) {
+        try {
+          var parsedUrl = new URL(applyUrl);
+          if ((parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") || !parsedUrl.hostname || parsedUrl.username || parsedUrl.password) applyUrl = "";
+          else applyUrl = parsedUrl.href;
+        } catch (error) { applyUrl = ""; }
+      }
       return {
         id: String(item.id || ""),
         title: String(item.title || "").trim(),
@@ -1179,11 +2680,122 @@
         jobType: String(item.jobType || "").trim(),
         workMode: String(item.workMode || "").trim(),
         requiredSkills: skills.map(function (skill) { return String(skill || "").trim(); }).filter(Boolean),
-        applyUrl: String(item.applyUrl || "").trim(),
+        eligibility: String(item.eligibility || "").trim(),
+        experience: String(item.experience || "").trim(),
+        deadline: String(item.deadline || "").trim(),
+        salaryMin: item.salaryMin == null ? "" : String(item.salaryMin),
+        salaryMax: item.salaryMax == null ? "" : String(item.salaryMax),
+        salaryCurrency: String(item.salaryCurrency || "INR"),
+        salaryPeriod: String(item.salaryPeriod || "year"),
+        applyUrl: applyUrl,
         status: status,
-        updatedAt: String(item.updatedAt || "")
+        createdAt: String(item.createdAt || item.updatedAt || ""),
+        updatedAt: String(item.updatedAt || item.createdAt || ""),
+        publishedAt: String(item.publishedAt || (status === "Published" ? item.updatedAt || item.createdAt || "" : "")),
+        lastRecruiterActivityAt: String(item.lastRecruiterActivityAt || (status === "Published" ? item.publishedAt || item.updatedAt || item.createdAt || "" : "")),
+        activityEvents: Array.isArray(item.activityEvents) ? item.activityEvents.map(function (event) {
+          var entry = event && typeof event === "object" ? event : {};
+          var type = ["published", "reconfirmed", "application_reviewed", "applicant_status_changed", "closed", "unpublished", "review_required"].indexOf(entry.type) >= 0 ? entry.type : "";
+          return { type: type, timestamp: String(entry.timestamp || ""), applicationId: String(entry.applicationId || "") };
+        }).filter(function (event) { return !!(event.type && event.timestamp); }).slice(-100) : []
       };
     }).filter(function (listing) { return !!(listing.id && listing.title); });
+    var seenIds = {};
+    return normalized.filter(function (listing) {
+      if (seenIds[listing.id]) return false;
+      seenIds[listing.id] = true;
+      return true;
+    });
+  }
+
+  function recruiterJobId(listingId, usedIds) {
+    var hash = 2166136261;
+    for (var i = 0; i < listingId.length; i++) {
+      hash ^= listingId.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    var id = -(Math.abs(hash >>> 0) + 1);
+    while (usedIds[id]) id--;
+    usedIds[id] = true;
+    return id;
+  }
+
+  function recruiterListingToJob(listing, id) {
+    var salaryMin = Number(listing.salaryMin);
+    var salaryMax = Number(listing.salaryMax);
+    var companyTrust = companyTrustForName(listing.company);
+    var companyProfile = companyTrust.profile;
+    var salary = listing.salaryMin && listing.salaryMax ? {
+      min: salaryMin,
+      max: salaryMax,
+      currency: listing.salaryCurrency,
+      period: listing.salaryPeriod
+    } : null;
+    return {
+      id: id,
+      recruiterListingId: listing.id,
+      source: "recruiter-local-demo",
+      companyProfileId: companyProfile ? companyProfile.id : "",
+      companyTrustStatus: companyTrust.status,
+      companyWebsite: companyProfile ? companyProfile.website : "",
+      companyEmailDomain: companyProfile ? companyProfile.emailDomain : "",
+      companyDescription: companyProfile ? companyProfile.description : "",
+      companyIndustry: companyProfile ? companyProfile.industry : "",
+      companyLocation: companyProfile ? companyProfile.location : "",
+      companyPublicLinks: companyProfile ? companyProfile.publicLinks.slice() : [],
+      title: listing.title,
+      company: listing.company,
+      logo: null,
+      category: "Recruiter listing",
+      type: listing.jobType === "Internship" ? "Internship" : "Job",
+      employmentType: ["Part-time", "Contract", "Freelance"].indexOf(listing.jobType) >= 0 ? listing.jobType : null,
+      mode: listing.workMode,
+      location: listing.location,
+      salary: salary,
+      experience: listing.experience || null,
+      skills: listing.requiredSkills.slice(),
+      description: listing.description || null,
+      postedDate: listing.createdAt ? listing.createdAt.slice(0, 10) : null,
+      deadline: listing.deadline || null,
+      applyUrl: listing.applyUrl || null,
+      status: "UNVERIFIED",
+      evidenceUrl: null,
+      tags: ["Recruiter-submitted demo listing"],
+      qualifications: listing.eligibility ? [listing.eligibility] : [],
+      responsibilities: [],
+      benefits: []
+    };
+  }
+
+  function recruiterJobIds(listings, baseJobs) {
+    var usedIds = {};
+    var ids = {};
+    (baseJobs || []).forEach(function (job) { usedIds[job.id] = true; });
+    listings.slice().sort(function (a, b) { return a.id.localeCompare(b.id); }).forEach(function (listing) {
+      ids[listing.id] = recruiterJobId(listing.id, usedIds);
+    });
+    return ids;
+  }
+
+  function getPublishedRecruiterJobs(baseJobs) {
+    var listings = getCurrentRecruiterListings();
+    if (!listings) return [];
+    var ids = recruiterJobIds(listings, baseJobs);
+    return listings.filter(function (listing) { return listing.status === "Published"; })
+      .map(function (listing) { return recruiterListingToJob(listing, ids[listing.id]); });
+  }
+
+  function cleanSavedJobIds(raw, jobs) {
+    var cleaned = Jobs.cleanSavedIds(raw, jobs);
+    var listings = getCurrentRecruiterListings();
+    if (!Array.isArray(raw) || !listings) return cleaned;
+    var recruiterIds = recruiterJobIds(listings, baseJobs);
+    var knownIds = {};
+    Object.keys(recruiterIds).forEach(function (listingId) { knownIds[recruiterIds[listingId]] = true; });
+    raw.forEach(function (id) {
+      if (typeof id === "number" && isFinite(id) && Math.floor(id) === id && knownIds[id] && cleaned.indexOf(id) === -1) cleaned.push(id);
+    });
+    return cleaned;
   }
 
   function readRecruiterListings() {
@@ -1210,6 +2822,106 @@
     }
   }
 
+  function validRecruiterTimestamp(value) {
+    if (typeof value !== "string" || !value.trim()) return false;
+    var time = Date.parse(value);
+    return isFinite(time) && time > 0 && time <= Date.now();
+  }
+
+  function addRecruiterActivity(listing, type, timestamp, applicationId) {
+    listing.activityEvents = Array.isArray(listing.activityEvents) ? listing.activityEvents : [];
+    var event = { type: type, timestamp: timestamp };
+    if (applicationId) event.applicationId = applicationId;
+    listing.activityEvents.push(event);
+    listing.activityEvents = listing.activityEvents.slice(-100);
+    listing.lastRecruiterActivityAt = timestamp;
+  }
+
+  function applyRecruiterReviewPolicy(listings, now) {
+    var changed = false;
+    var checkedAt = now || new Date();
+    listings.forEach(function (listing) {
+      if (listing.status !== "Published") return;
+      var activityAt = listing.lastRecruiterActivityAt || listing.publishedAt;
+      var expired = !validRecruiterTimestamp(activityAt) || checkedAt.getTime() - Date.parse(activityAt) >= RECRUITER_REVIEW_WINDOW_MS;
+      if (!expired) return;
+      listing.status = "Expired";
+      listing.updatedAt = checkedAt.toISOString();
+      listing.activityEvents = Array.isArray(listing.activityEvents) ? listing.activityEvents : [];
+      listing.activityEvents.push({ type: "review_required", timestamp: checkedAt.toISOString() });
+      listing.activityEvents = listing.activityEvents.slice(-100);
+      changed = true;
+    });
+    return changed;
+  }
+
+  function getCurrentRecruiterListings() {
+    var listings = readRecruiterListings();
+    if (!listings) return null;
+    if (applyRecruiterReviewPolicy(listings) && !writeRecruiterListings(listings)) return null;
+    return listings;
+  }
+
+  function recruiterReviewDeadline(listing) {
+    var activityAt = listing.lastRecruiterActivityAt || listing.publishedAt;
+    if (!validRecruiterTimestamp(activityAt)) return null;
+    return Date.parse(activityAt) + RECRUITER_REVIEW_WINDOW_MS;
+  }
+
+  function recruiterReviewSummary(listing, now) {
+    var deadline = recruiterReviewDeadline(listing);
+    if (listing.status === "Expired") return { text: "Needs review · expired from active opportunities", urgent: true };
+    if (listing.status !== "Published") return { text: "Review window is not active for this status.", urgent: false };
+    if (deadline === null) return { text: "Needs review · activity date unavailable", urgent: true };
+    var remaining = deadline - (now || Date.now());
+    if (remaining <= 0) return { text: "Needs review now · 15-day activity window reached", urgent: true };
+    var days = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+    return { text: "Review due " + formatRecruiterDate(new Date(deadline).toISOString()) + " · " + days + (days === 1 ? " day remaining" : " days remaining"), urgent: days <= 3 };
+  }
+
+  function recruiterActivityLabel(type) {
+    return {
+      published: "Published",
+      reconfirmed: "Vacancy reconfirmed",
+      application_reviewed: "Application reviewed",
+      applicant_status_changed: "Applicant status changed",
+      closed: "Job closed",
+      unpublished: "Job unpublished",
+      review_required: "15-day review required"
+    }[type] || "Recruiter activity";
+  }
+
+  function companyTrustLabel(status) {
+    if (status === "Verified") return "Company verified";
+    if (status === "Pending Review") return "Company pending review";
+    if (status === "Rejected") return "Company request rejected";
+    return "Company not verified";
+  }
+
+  function companyTrustExplanation(status) {
+    if (status === "Verified") return "Approved through a real, documented review process.";
+    if (status === "Pending Review") return "A local demo request was saved; no reviewer is connected and this is not approval.";
+    if (status === "Rejected") return "A request is marked rejected; this local demo does not provide reviewer decisions.";
+    return "No completed company verification. Details are recruiter-provided and not independently checked.";
+  }
+
+  function companyTrustClass(status) {
+    return status === "Verified" ? "verified" : status === "Pending Review" ? "pending" :
+      status === "Rejected" ? "rejected" : "not-submitted";
+  }
+
+  function recordRecruiterListingActivity(listings, listingId, type, applicationId, timestamp) {
+    var at = timestamp || new Date().toISOString();
+    var found = false;
+    listings.forEach(function (listing) {
+      if (listing.id !== listingId) return;
+      found = true;
+      addRecruiterActivity(listing, type, at, applicationId);
+      if (listing.status === "Published") listing.updatedAt = at;
+    });
+    return found;
+  }
+
   function formatRecruiterDate(value) {
     if (!value || isNaN(Date.parse(value))) return "Not provided";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(new Date(value));
@@ -1217,31 +2929,48 @@
 
   function recruiterListingMarkup(listing) {
     var statusClass = listing.status.toLowerCase();
+    var displayStatus = listing.status === "Expired" ? "Needs Review" : listing.status;
+    var review = recruiterReviewSummary(listing);
+    var actions = '<button class="btn btn--secondary" type="button" data-recruiter-edit="' + escapeHtml(listing.id) + '">Edit</button>' +
+      '<button class="btn btn--text" type="button" data-recruiter-preview="' + escapeHtml(listing.id) + '">Preview</button>';
+    if (listing.status === "Expired" || listing.status === "Published") actions += '<button class="btn btn--primary" type="button" data-recruiter-reconfirm="' + escapeHtml(listing.id) + '">Reconfirm Vacancy</button>';
+    else if (listing.status !== "Published") actions += '<button class="btn btn--secondary" type="button" data-recruiter-status="' + escapeHtml(listing.id) + '" data-next-status="Published">' + (listing.status === "Closed" ? "Reopen &amp; publish" : "Publish") + '</button>';
+    if (listing.status === "Published") actions += '<button class="btn btn--text" type="button" data-recruiter-status="' + escapeHtml(listing.id) + '" data-next-status="Unpublished">Unpublish</button>';
+    if (listing.status !== "Closed") actions += '<button class="btn btn--text" type="button" data-recruiter-status="' + escapeHtml(listing.id) + '" data-next-status="Closed">Close</button>';
+    actions += '<button class="btn btn--text recruiter-delete" type="button" data-recruiter-delete="' + escapeHtml(listing.id) + '">Delete</button>';
     return '<li class="recruiter-listing">' +
       '<div class="recruiter-listing__content">' +
-        '<div class="recruiter-listing__heading"><h3>' + escapeHtml(listing.title) + '</h3><span class="recruiter-status recruiter-status--' + statusClass + '">' + escapeHtml(listing.status) + '</span></div>' +
+        '<div class="recruiter-listing__heading"><h3>' + escapeHtml(listing.title) + '</h3><span class="recruiter-status recruiter-status--' + statusClass + '">' + escapeHtml(displayStatus) + '</span></div>' +
         '<p class="recruiter-listing__company">' + escapeHtml(listing.company) + '</p>' +
+        '<p class="recruiter-listing__meta"><strong>Company trust:</strong> ' + escapeHtml(companyTrustLabel(companyTrustForName(listing.company).status)) + '</p>' +
         '<p class="recruiter-listing__meta">' + escapeHtml(listing.location) + ' · ' + escapeHtml(listing.workMode) + ' · ' + escapeHtml(listing.jobType) + '</p>' +
         '<p class="recruiter-listing__meta"><strong>Required skills:</strong> ' + escapeHtml(listing.requiredSkills.join(", ")) + '</p>' +
-        '<p class="recruiter-listing__meta"><strong>Last updated:</strong> ' + escapeHtml(formatRecruiterDate(listing.updatedAt)) + '</p>' +
-        (listing.status === "Published" ? '<p class="recruiter-listing__note">Demo status only; not publicly published or verified.</p>' : '') +
+        '<p class="recruiter-listing__meta"><strong>Created:</strong> ' + escapeHtml(formatRecruiterDate(listing.createdAt)) + ' · <strong>Updated:</strong> ' + escapeHtml(formatRecruiterDate(listing.updatedAt)) + '</p>' +
+        '<p class="recruiter-review ' + (review.urgent ? 'recruiter-review--urgent' : '') + '"><strong>Last recruiter activity:</strong> ' + escapeHtml(formatRecruiterDate(listing.lastRecruiterActivityAt)) + '<br><strong>15-day review:</strong> ' + escapeHtml(review.text) + '</p>' +
+        (listing.activityEvents.length ? '<details class="recruiter-activity"><summary>Activity history (' + listing.activityEvents.length + ')</summary><ul>' +
+          listing.activityEvents.slice().reverse().map(function (event) {
+            return '<li>' + escapeHtml(recruiterActivityLabel(event.type)) + ' · ' + escapeHtml(formatRecruiterDate(event.timestamp)) +
+              (event.applicationId ? ' · application ' + escapeHtml(event.applicationId) : '') + '</li>';
+          }).join("") + '</ul></details>' : '<p class="recruiter-listing__note">No audit events recorded yet.</p>') +
+        (listing.status === "Published" ? '<p class="recruiter-listing__note">Local demo listing, visible only in this browser’s job explorer; not verified or shared.</p>' : '') +
       '</div>' +
-      '<div class="recruiter-listing__actions">' +
-        '<button class="btn btn--secondary" type="button" data-recruiter-edit="' + escapeHtml(listing.id) + '">Edit</button>' +
-        '<button class="btn btn--text recruiter-delete" type="button" data-recruiter-delete="' + escapeHtml(listing.id) + '">Delete</button>' +
-      '</div>' +
+      '<div class="recruiter-listing__actions">' + actions + '</div>' +
     '</li>';
   }
 
   function renderRecruiterPortal() {
-    var listings = readRecruiterListings();
+    var listings = getCurrentRecruiterListings();
+    renderRecruiterApplicants(listings);
     var dashboardList = document.getElementById("recruiter-dashboard-list");
     var listingsList = document.getElementById("recruiter-listings");
     var totalCount = document.getElementById("recruiter-total-count");
     var activeCount = document.getElementById("recruiter-active-count");
     var draftCount = document.getElementById("recruiter-draft-count");
+    var closedCount = document.getElementById("recruiter-closed-count");
+    var unpublishedCount = document.getElementById("recruiter-unpublished-count");
+    var reviewCount = document.getElementById("recruiter-review-count");
     if (!listings) {
-      [totalCount, activeCount, draftCount].forEach(function (el) { if (el) el.textContent = "—"; });
+      [totalCount, activeCount, draftCount, closedCount, unpublishedCount, reviewCount].forEach(function (el) { if (el) el.textContent = "—"; });
       [dashboardList, listingsList].forEach(function (el) {
         if (el) el.innerHTML = '<li class="empty--compact"><h3>Listings unavailable</h3><p>Browser-local data could not be read.</p></li>';
       });
@@ -1249,14 +2978,281 @@
     }
     var active = listings.filter(function (listing) { return listing.status === "Published"; }).length;
     var drafts = listings.filter(function (listing) { return listing.status === "Draft"; }).length;
+    var closed = listings.filter(function (listing) { return listing.status === "Closed"; }).length;
+    var unpublished = listings.filter(function (listing) { return listing.status === "Unpublished"; }).length;
+    var needsReview = listings.filter(function (listing) { return listing.status === "Expired"; }).length;
     if (totalCount) totalCount.textContent = String(listings.length);
     if (activeCount) activeCount.textContent = String(active);
     if (draftCount) draftCount.textContent = String(drafts);
+    if (closedCount) closedCount.textContent = String(closed);
+    if (unpublishedCount) unpublishedCount.textContent = String(unpublished);
+    if (reviewCount) reviewCount.textContent = String(needsReview);
     var ordered = listings.slice().sort(function (a, b) { return Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0); });
-    var empty = '<li class="empty--compact"><h3>No job listings yet</h3><p>Create a job draft to keep a listing in this browser. Nothing will be publicly posted.</p></li>';
-    [dashboardList, listingsList].forEach(function (el) {
-      if (el) el.innerHTML = ordered.length ? ordered.map(recruiterListingMarkup).join("") : empty;
+    var searchValue = (document.getElementById("recruiter-listing-search") || {}).value || "";
+    var filterValue = (document.getElementById("recruiter-listing-filter") || {}).value || "all";
+    var filtered = ordered.filter(function (listing) {
+      return (!searchValue || (listing.title + " " + listing.company).toLowerCase().indexOf(searchValue.trim().toLowerCase()) !== -1) &&
+        (filterValue === "all" || listing.status === filterValue);
     });
+    if (dashboardList) dashboardList.innerHTML = ordered.length ? ordered.slice(0, 5).map(recruiterListingMarkup).join("") : '<li class="empty--compact"><h3>No job listings yet</h3><p>Create a job draft to manage a listing in this browser.</p></li>';
+    if (listingsList && filtered.length) {
+      var statusOrder = ["Published", "Expired", "Draft", "Unpublished", "Closed"];
+      listingsList.innerHTML = filterValue === "all" ? statusOrder.map(function (status) {
+        var group = filtered.filter(function (listing) { return listing.status === status; });
+        var heading = status === "Expired" ? "Needs Review" : status;
+        return group.length ? '<li class="recruiter-list-section-heading"><h3>' + heading + ' <span>(' + group.length + ')</span></h3></li>' +
+          group.map(recruiterListingMarkup).join("") : "";
+      }).join("") : filtered.map(recruiterListingMarkup).join("");
+    } else if (listingsList) {
+      listingsList.innerHTML = '<li class="empty--compact"><h3>' + (ordered.length ? "No listings match these filters" : "No job listings yet") + '</h3><p>' +
+        (ordered.length ? "Try another title or status filter." : "Create a job draft to manage a listing in this browser.") + '</p></li>';
+    }
+  }
+
+  function readRecruiterApplicantProfile() {
+    try {
+      var raw = window.localStorage.getItem(AUTH_PROFILE_KEY);
+      if (raw === null) return { profile: null, error: "" };
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+          (parsed.applications !== undefined && !Array.isArray(parsed.applications))) {
+        return { profile: null, error: "Applicant records are unavailable because the saved demo profile data is malformed." };
+      }
+      return { profile: parsed, error: "" };
+    } catch (error) {
+      return { profile: null, error: "Applicant records could not be read from this browser. No data was changed." };
+    }
+  }
+
+  function recruiterApplicantRows(listings, profile) {
+    if (!profile) return [];
+    var ids = recruiterJobIds(listings, baseJobs);
+    var listingById = {};
+    var listingByJobId = {};
+    listings.forEach(function (listing) {
+      listingById[listing.id] = listing;
+      listingByJobId[String(ids[listing.id])] = listing;
+    });
+    return normalizeStudentProfile(profile).applications.map(function (application) {
+      var listing = application.recruiterListingId ? listingById[application.recruiterListingId] : null;
+      if (!listing && !application.recruiterListingId && application.jobId) listing = listingByJobId[String(application.jobId)];
+      if (!listing) return null;
+      return { application: application, listing: listing };
+    }).filter(Boolean).sort(function (a, b) {
+      return (b.application.applicationDate || "").localeCompare(a.application.applicationDate || "");
+    });
+  }
+
+  function recruiterCandidateDetails(profile) {
+    var candidate = normalizeStudentProfile(profile);
+    var details = [];
+    if (candidate.headline) details.push('<p><strong>Headline:</strong> ' + escapeHtml(candidate.headline) + '</p>');
+    var education = [candidate.educationLevel, candidate.collegeName, candidate.graduationYear].filter(Boolean).join(" · ");
+    if (education) details.push('<p><strong>Education:</strong> ' + escapeHtml(education) + '</p>');
+    if (candidate.skills.length) {
+      details.push('<div><strong>Skills (self-declared):</strong><ul class="recruiter-candidate__skills">' +
+        candidate.skills.map(function (skill) {
+          return '<li>' + escapeHtml(skill.name) + (skill.level ? ' · ' + escapeHtml(skill.level) : '') + '</li>';
+        }).join("") + '</ul></div>');
+    }
+    if (candidate.projects.length) {
+      details.push('<div><strong>Projects added by student:</strong><ul class="recruiter-candidate__projects">' +
+        candidate.projects.map(function (project) {
+          var links = [];
+          if (isHttpUrl(project.githubUrl)) links.push('<a href="' + escapeHtml(project.githubUrl) + '" target="_blank" rel="noopener noreferrer">Repository link provided</a>');
+          if (isHttpUrl(project.liveDemoUrl)) links.push('<a href="' + escapeHtml(project.liveDemoUrl) + '" target="_blank" rel="noopener noreferrer">Live demo link provided</a>');
+          return '<li><strong>' + escapeHtml(project.title) + '</strong>' +
+            (project.description ? '<p>' + escapeHtml(project.description) + '</p>' : '') +
+            (project.role ? '<p>Role: ' + escapeHtml(project.role) + '</p>' : '') +
+            (project.technologies ? '<p>Technologies: ' + escapeHtml(project.technologies) + '</p>' : '') +
+            (links.length ? '<p class="recruiter-candidate__links">' + links.join(" · ") + '</p>' : '') + '</li>';
+        }).join("") + '</ul></div>');
+    }
+    var profileLinks = [];
+    if (isHttpUrl(candidate.githubUrl)) profileLinks.push('<a href="' + escapeHtml(candidate.githubUrl) + '" target="_blank" rel="noopener noreferrer">GitHub profile link provided</a>');
+    if (isHttpUrl(candidate.portfolioUrl)) profileLinks.push('<a href="' + escapeHtml(candidate.portfolioUrl) + '" target="_blank" rel="noopener noreferrer">Portfolio link provided</a>');
+    if (profileLinks.length) details.push('<p>' + profileLinks.join(" · ") + '</p>');
+    var sharedSessions = candidate.defenseSessions.filter(function (session) {
+      return session.status === "completed" && session.shareWithRecruiters;
+    });
+    if (sharedSessions.length) {
+      details.push('<div class="recruiter-shared-assessments"><strong>Project Defense sessions shared by the student</strong><p>Rule-based demo exercise; no AI or repository inspection. These indicative summaries do not independently verify skills, identity, or authorship.</p>' +
+        sharedSessions.map(function (session) {
+          var projectStillExists = candidate.projects.some(function (project) { return project.id === session.projectId; });
+          var summary = session.result && session.result.strengths.length ? session.result : summarizeDefenseSession(session);
+          return '<details class="recruiter-shared-assessment"><summary>' + escapeHtml(session.project.title || "Project Defense") + (projectStillExists ? "" : " · project no longer in profile") + '</summary>' +
+            (session.project.description ? '<p>' + escapeHtml(session.project.description) + '</p>' : '') +
+            '<p><strong>Role:</strong> ' + escapeHtml(session.project.role || "Not provided") + '</p>' +
+            '<p><strong>Technologies:</strong> ' + escapeHtml(session.project.technologies || "Not provided") + '</p>' +
+            '<ol>' + session.questions.map(function (question) {
+              return '<li><strong>' + escapeHtml(question.category) + ': ' + escapeHtml(question.text) + '</strong><p>' + escapeHtml(question.answer.trim() || "No response submitted.") + '</p></li>';
+            }).join("") + '</ol>' +
+            '<p><strong>Indicative summary:</strong> ' + escapeHtml(summary.strengths.join(" ")) + '</p>' +
+            '<p><strong>Unanswered:</strong> ' + escapeHtml(summary.unanswered.length ? summary.unanswered.join(", ") : "None") + '</p>' +
+            (summary.reviewTopics.length ? '<p><strong>Review topics:</strong> ' + escapeHtml(summary.reviewTopics.join(" ")) + '</p>' : '') +
+          '</details>';
+        }).join("") + '</div>');
+    }
+    return details.length ? details.join("") : '<p>Candidate has not provided additional profile details.</p>';
+  }
+
+  function recruiterApplicantMarkup(row, profile) {
+    var application = row.application;
+    var listing = row.listing;
+    var effectiveStatus = application.recruiterStatus || application.status;
+    var statusSource = application.recruiterStatus
+      ? 'Recruiter-updated locally' + (application.recruiterUpdatedAt ? ' · ' + escapeHtml(formatStudentApplicationDate(application.recruiterUpdatedAt.slice(0, 10))) : '')
+      : 'Student-entered; not employer-confirmed';
+    return '<li class="recruiter-applicant">' +
+      '<div class="recruiter-applicant__header">' +
+        '<div><h3>' + escapeHtml(application.jobTitle) + '</h3><p class="recruiter-listing__company">' + escapeHtml(listing.company) + '</p></div>' +
+        '<span class="student-application-status">' + escapeHtml(effectiveStatus) + '</span>' +
+      '</div>' +
+      '<p class="recruiter-listing__meta"><strong>Applied:</strong> ' + escapeHtml(formatStudentApplicationDate(application.applicationDate)) +
+        ' · <strong>Candidate:</strong> ' + escapeHtml(normalizeStudentProfile(profile).fullName || 'Name not provided') + '</p>' +
+      '<p class="recruiter-listing__note">' + statusSource + '</p>' +
+      '<div class="recruiter-applicant__controls">' +
+        '<div class="field-group"><label for="recruiter-app-status-' + escapeHtml(application.id) + '">Recruiter demo status</label>' +
+          '<select class="select" id="recruiter-app-status-' + escapeHtml(application.id) + '" data-recruiter-app-status="' + escapeHtml(application.id) + '">' +
+            studentApplicationStatuses.map(function (status) {
+              return '<option value="' + escapeHtml(status) + '"' + (status === effectiveStatus ? ' selected' : '') + '>' + escapeHtml(status) + '</option>';
+            }).join("") +
+          '</select></div>' +
+        '<button class="btn btn--secondary" type="button" data-recruiter-app-save="' + escapeHtml(application.id) + '">Save status</button>' +
+        '<button class="btn btn--text" type="button" data-recruiter-candidate-details aria-expanded="false">Candidate details</button>' +
+      '</div>' +
+      '<div class="recruiter-candidate" hidden>' + recruiterCandidateDetails(profile) + '</div>' +
+    '</li>';
+  }
+
+  function renderRecruiterApplicants(listings) {
+    var list = document.getElementById("recruiter-applicant-list");
+    var count = document.getElementById("recruiter-applicant-count");
+    var total = document.getElementById("recruiter-applicant-total");
+    var message = document.getElementById("recruiter-applicant-message");
+    var jobFilter = document.getElementById("recruiter-applicant-job-filter");
+    if (!list) return;
+    if (!Array.isArray(listings)) {
+      if (count) count.textContent = "—";
+      if (total) total.textContent = "Unavailable";
+      if (message) message.textContent = "Applicant associations are unavailable because recruiter listing data could not be read.";
+      list.innerHTML = '<li class="empty--compact"><h3>Applicant data unavailable</h3><p>Recruiter job records could not be safely read.</p></li>';
+      return;
+    }
+    var source = readRecruiterApplicantProfile();
+    if (source.error) {
+      if (count) count.textContent = "—";
+      if (total) total.textContent = "Unavailable";
+      if (message) message.textContent = source.error;
+      list.innerHTML = '<li class="empty--compact"><h3>Applicant data unavailable</h3><p>Saved profile data could not be safely read.</p></li>';
+      return;
+    }
+    if (message) message.textContent = "";
+    var profile = source.profile;
+    var rows = recruiterApplicantRows(listings, profile);
+    if (count) count.textContent = String(rows.length);
+    if (total) total.textContent = rows.length + (rows.length === 1 ? " recorded" : " recorded");
+    if (jobFilter) {
+      var selectedJob = jobFilter.value;
+      var options = '<option value="">All your listings</option>' + listings.map(function (listing) {
+        return '<option value="' + escapeHtml(listing.id) + '">' + escapeHtml(listing.title + " · " + listing.company) + '</option>';
+      }).join("");
+      if (jobFilter.innerHTML !== options) jobFilter.innerHTML = options;
+      if (selectedJob && listings.some(function (listing) { return listing.id === selectedJob; })) jobFilter.value = selectedJob;
+    }
+    if (!listings.length) {
+      list.innerHTML = '<li class="empty--compact"><h3>No recruiter listings available</h3><p>Create a listing before applications can be associated with it.</p></li>';
+      return;
+    }
+    if (!profile || !rows.length) {
+      list.innerHTML = '<li class="empty--compact"><h3>No applications recorded for your listings</h3><p>Only a student record explicitly saved in this browser and linked to one of your recruiter job IDs appears here. External Apply Now visits are not applications.</p></li>';
+      return;
+    }
+    var selectedJobId = jobFilter ? jobFilter.value : "";
+    var statusFilter = document.getElementById("recruiter-applicant-status-filter");
+    var search = document.getElementById("recruiter-applicant-search");
+    var selectedStatus = statusFilter ? statusFilter.value : "";
+    var query = search ? search.value.trim().toLowerCase() : "";
+    var filtered = rows.filter(function (row) {
+      var status = row.application.recruiterStatus || row.application.status;
+      var matchesJob = !selectedJobId || row.listing.id === selectedJobId;
+      var matchesStatus = !selectedStatus || status === selectedStatus;
+      var matchesQuery = !query || (normalizeStudentProfile(profile).fullName + " " + row.application.jobTitle).toLowerCase().indexOf(query) !== -1;
+      return matchesJob && matchesStatus && matchesQuery;
+    });
+    list.innerHTML = filtered.length
+      ? filtered.map(function (row) { return recruiterApplicantMarkup(row, profile); }).join("")
+      : '<li class="empty--compact"><h3>No matching applicants</h3><p>Try another listing, status, or search term.</p></li>';
+  }
+
+  function saveRecruiterApplicantStatus(applicationId) {
+    var selector = Array.prototype.filter.call(document.querySelectorAll("[data-recruiter-app-status]"), function (item) {
+      return item.dataset.recruiterAppStatus === applicationId;
+    })[0];
+    var nextStatus = selector ? selector.value : "";
+    if (studentApplicationStatuses.indexOf(nextStatus) === -1) return;
+    var listings = getCurrentRecruiterListings();
+    var source = readRecruiterApplicantProfile();
+    if (!listings || source.error || !source.profile) {
+      var message = document.getElementById("recruiter-applicant-message");
+      if (message) message.textContent = source.error || "Applicant profile is not available in this browser.";
+      return;
+    }
+    var row = recruiterApplicantRows(listings, source.profile).find(function (item) { return item.application.id === applicationId; });
+    if (!row) {
+      var statusMessage = document.getElementById("recruiter-applicant-message");
+      if (statusMessage) statusMessage.textContent = "This application is no longer associated with an available recruiter listing.";
+      renderRecruiterApplicants(listings);
+      return;
+    }
+    var currentStatus = row.application.recruiterStatus || row.application.status;
+    if (currentStatus === nextStatus) {
+      var unchangedMessage = document.getElementById("recruiter-applicant-message");
+      if (unchangedMessage) unchangedMessage.textContent = "Status is unchanged; no new activity was recorded.";
+      return;
+    }
+    var updatedAt = new Date().toISOString();
+    var previousListings = JSON.parse(JSON.stringify(listings));
+    recordRecruiterListingActivity(listings, row.listing.id, "applicant_status_changed", applicationId, updatedAt);
+    if (!writeRecruiterListings(listings)) return;
+    if (!source.profile.profileId) source.profile.profileId = "candidate_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    var normalized = normalizeStudentProfile(source.profile);
+    normalized.applications = normalized.applications.map(function (application) {
+      if (application.id !== applicationId) return application;
+      application.recruiterStatus = nextStatus;
+      application.recruiterUpdatedAt = updatedAt;
+      return application;
+    });
+    normalized.applications.forEach(function (application) {
+      if (!application.candidateId) application.candidateId = source.profile.profileId;
+    });
+    source.profile.applications = normalized.applications;
+    if (!writeDemoProfile(source.profile)) {
+      writeRecruiterListings(previousListings);
+      var errorMessage = document.getElementById("recruiter-applicant-message");
+      if (errorMessage) errorMessage.textContent = "Recruiter status could not be saved in this browser.";
+      return;
+    }
+    var successMessage = document.getElementById("recruiter-applicant-message");
+    if (successMessage) successMessage.textContent = "Recruiter demo status saved locally. No notification was sent.";
+    renderRecruiterApplicants(listings);
+    renderRecruiterPortal();
+    refreshPublishedJobs();
+    renderStudentApplicationLists(source.profile);
+    renderStudentDashboard();
+  }
+
+  function recordRecruiterApplicationReview(applicationId) {
+    var listings = getCurrentRecruiterListings();
+    var source = readRecruiterApplicantProfile();
+    if (!listings || source.error || !source.profile) return false;
+    var row = recruiterApplicantRows(listings, source.profile).find(function (item) { return item.application.id === applicationId; });
+    if (!row) return false;
+    var at = new Date().toISOString();
+    recordRecruiterListingActivity(listings, row.listing.id, "application_reviewed", applicationId, at);
+    if (!writeRecruiterListings(listings)) return false;
+    refreshPublishedJobs();
+    return true;
   }
 
   function showRecruiterRoute(route) {
@@ -1272,6 +3268,8 @@
     var viewMap = {
       dashboard: document.getElementById("recruiter-dashboard-view"),
       listings: document.getElementById("recruiter-listings-view"),
+      applications: document.getElementById("recruiter-applications-view"),
+      trust: document.getElementById("recruiter-trust-view"),
       editor: document.getElementById("recruiter-editor-view")
     };
     $$(".recruiter-view").forEach(function (view) {
@@ -1286,6 +3284,7 @@
     });
     recruiterShell.hidden = false;
     renderRecruiterPortal();
+    if (route === "trust") renderCompanyTrustCenter();
   }
 
   function resetRecruiterForm() {
@@ -1293,13 +3292,22 @@
     recruiterForm.reset();
     recruiterListingDraftId = null;
     var title = document.getElementById("recruiter-editor-title");
-    if (title) title.textContent = "Create a job draft";
+    if (title) title.textContent = "Create Job";
+    var publishButton = document.getElementById("recruiter-save-listing");
+    if (publishButton) {
+      publishButton.textContent = "Publish Job";
+      publishButton.dataset.saveMode = "publish";
+    }
     recruiterFieldIds.forEach(function (id) { clearFieldError(id); });
+    var preview = document.getElementById("recruiter-preview");
+    if (preview) preview.hidden = true;
+    recruiterForm.hidden = false;
     setRecruiterStatus("");
   }
 
   function openRecruiterListingEditor(listingId) {
     resetRecruiterForm();
+    var publishButton = document.getElementById("recruiter-save-listing");
     if (listingId) {
       var listings = readRecruiterListings();
       var listing = listings && listings.find(function (item) { return item.id === listingId; });
@@ -1313,22 +3321,31 @@
         ["recruiter-job-title", listing.title], ["recruiter-company", listing.company],
         ["recruiter-description", listing.description], ["recruiter-location", listing.location],
         ["recruiter-job-type", listing.jobType], ["recruiter-work-mode", listing.workMode],
-        ["recruiter-skills", listing.requiredSkills.join(", ")], ["recruiter-apply-url", listing.applyUrl],
-        ["recruiter-status", listing.status]
+        ["recruiter-skills", listing.requiredSkills.join(", ")], ["recruiter-eligibility", listing.eligibility],
+        ["recruiter-experience", listing.experience], ["recruiter-deadline", listing.deadline],
+        ["recruiter-salary-min", listing.salaryMin], ["recruiter-salary-max", listing.salaryMax],
+        ["recruiter-salary-currency", listing.salaryCurrency], ["recruiter-salary-period", listing.salaryPeriod],
+        ["recruiter-apply-url", listing.applyUrl]
       ].forEach(function (pair) {
         var field = document.getElementById(pair[0]);
         if (field) field.value = pair[1] || "";
       });
       var heading = document.getElementById("recruiter-editor-title");
       if (heading) heading.textContent = "Edit job listing";
+      if (publishButton) {
+        publishButton.textContent = "Save Changes";
+        publishButton.dataset.saveMode = "update";
+      }
     }
     showRecruiterRoute("editor");
     var firstField = document.getElementById("recruiter-job-title");
     if (firstField) firstField.focus();
   }
 
-  function recruiterListingErrors() {
+  function recruiterListingErrors(requireComplete) {
     var errors = {};
+    var titleInput = document.getElementById("recruiter-job-title");
+    if (!titleInput || !titleInput.value.trim()) errors["recruiter-job-title"] = "Enter a job title to save this listing.";
     var requiredFields = [
       ["recruiter-job-title", "Enter a job title."],
       ["recruiter-company", "Enter a company name."],
@@ -1336,12 +3353,36 @@
       ["recruiter-location", "Enter a location."],
       ["recruiter-job-type", "Select a job type."],
       ["recruiter-work-mode", "Select a work mode."],
-      ["recruiter-skills", "Enter at least one required skill."]
+      ["recruiter-skills", "Enter at least one required skill."],
+      ["recruiter-eligibility", "Enter eligibility details."],
+      ["recruiter-experience", "Select an experience level."],
+      ["recruiter-deadline", "Select an application deadline."]
     ];
-    requiredFields.forEach(function (pair) {
+    (requireComplete ? requiredFields : []).forEach(function (pair) {
       var field = document.getElementById(pair[0]);
       if (!field || !field.value.trim()) errors[pair[0]] = pair[1];
     });
+    var skillsInput = document.getElementById("recruiter-skills");
+    if (requireComplete && skillsInput && !skillsInput.value.split(",").some(function (skill) { return !!skill.trim(); })) {
+      errors["recruiter-skills"] = "Enter at least one required skill.";
+    }
+    var deadline = document.getElementById("recruiter-deadline");
+    if (deadline && deadline.value) {
+      var validDeadline = /^\d{4}-\d{2}-\d{2}$/.test(deadline.value) &&
+        !isNaN(Date.parse(deadline.value + "T00:00:00Z")) &&
+        new Date(Date.parse(deadline.value + "T00:00:00Z")).toISOString().slice(0, 10) === deadline.value;
+      var today = new Date();
+      var todayValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+      if (!validDeadline || deadline.value < todayValue) errors["recruiter-deadline"] = "Enter a valid deadline that is today or later.";
+    }
+    var minSalary = document.getElementById("recruiter-salary-min");
+    var maxSalary = document.getElementById("recruiter-salary-max");
+    var minValue = minSalary ? minSalary.value.trim() : "";
+    var maxValue = maxSalary ? maxSalary.value.trim() : "";
+    if (!!minValue !== !!maxValue) errors["recruiter-salary-min"] = "Enter both salary bounds or leave the range blank.";
+    if (minValue && maxValue && (!isFinite(Number(minValue)) || !isFinite(Number(maxValue)) || Number(minValue) <= 0 || Number(maxValue) < Number(minValue))) {
+      errors["recruiter-salary-min"] = "Enter a valid salary range with the maximum at least the minimum.";
+    }
     var url = document.getElementById("recruiter-apply-url");
     if (url && url.value.trim()) {
       try {
@@ -1356,17 +3397,10 @@
     return errors;
   }
 
-  function saveRecruiterListing(forceDraft) {
-    if (!recruiterForm) return;
-    recruiterFieldIds.forEach(function (id) { clearFieldError(id); });
-    var errors = recruiterListingErrors();
-    markFormErrors(recruiterForm, errors);
-    if (Object.keys(errors).length) {
-      setRecruiterStatus("Please fix the highlighted fields and try again.");
-      return;
-    }
-    var existing = readRecruiterListings();
-    if (!existing) return;
+  function collectRecruiterFormData(status, existing) {
+    var now = new Date().toISOString();
+    var minSalary = document.getElementById("recruiter-salary-min").value.trim();
+    var maxSalary = document.getElementById("recruiter-salary-max").value.trim();
     var record = {
       id: recruiterListingDraftId || "listing_" + Date.now() + "_" + Math.random().toString(16).slice(2),
       title: document.getElementById("recruiter-job-title").value.trim(),
@@ -1376,10 +3410,47 @@
       jobType: document.getElementById("recruiter-job-type").value,
       workMode: document.getElementById("recruiter-work-mode").value,
       requiredSkills: document.getElementById("recruiter-skills").value.split(",").map(function (skill) { return skill.trim(); }).filter(Boolean),
+      eligibility: document.getElementById("recruiter-eligibility").value.trim(),
+      experience: document.getElementById("recruiter-experience").value,
+      deadline: document.getElementById("recruiter-deadline").value,
+      salaryMin: minSalary,
+      salaryMax: maxSalary,
+      salaryCurrency: document.getElementById("recruiter-salary-currency").value,
+      salaryPeriod: document.getElementById("recruiter-salary-period").value,
       applyUrl: document.getElementById("recruiter-apply-url").value.trim(),
-      status: forceDraft ? "Draft" : document.getElementById("recruiter-status").value,
-      updatedAt: new Date().toISOString()
+      status: status,
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+      publishedAt: existing ? existing.publishedAt : "",
+      lastRecruiterActivityAt: existing ? existing.lastRecruiterActivityAt : "",
+      activityEvents: existing ? existing.activityEvents.slice() : []
     };
+    if (status === "Published" && (!existing || existing.status !== "Published")) {
+      record.publishedAt = now;
+      addRecruiterActivity(record, "published", now);
+    } else if (existing && status === "Draft" && existing.status === "Published") {
+      addRecruiterActivity(record, "unpublished", now);
+    }
+    return record;
+  }
+
+  function saveRecruiterListing(status) {
+    if (!recruiterForm || recruiterSaving) return;
+    recruiterFieldIds.forEach(function (id) { clearFieldError(id); });
+    var errors = recruiterListingErrors(status === "Published");
+    markFormErrors(recruiterForm, errors);
+    if (Object.keys(errors).length) {
+      setRecruiterStatus(status === "Published" ? "Complete every required field and fix the highlighted values before publishing." : "Fix the highlighted dates, salary range, or application URL before saving the draft.");
+      return;
+    }
+    var existing = getCurrentRecruiterListings();
+    if (!existing) return;
+    var oldRecord = existing.find(function (listing) { return listing.id === recruiterListingDraftId; }) || null;
+    if (status === "Published" && oldRecord && oldRecord.status === "Expired") {
+      setRecruiterStatus('Use "Reconfirm Vacancy" to explicitly review and republish an expired listing.');
+      return;
+    }
+    var record = collectRecruiterFormData(status, oldRecord);
     var found = false;
     var updated = existing.map(function (listing) {
       if (listing.id !== record.id) return listing;
@@ -1387,10 +3458,24 @@
       return record;
     });
     if (!found) updated.push(record);
-    if (!writeRecruiterListings(updated)) return;
+    recruiterSaving = true;
+    var saveButton = document.getElementById("recruiter-save-listing");
+    var draftButton = document.getElementById("recruiter-save-draft");
+    if (saveButton) saveButton.disabled = true;
+    if (draftButton) draftButton.disabled = true;
+    var stored = writeRecruiterListings(updated);
+    recruiterSaving = false;
+    if (saveButton) saveButton.disabled = false;
+    if (draftButton) draftButton.disabled = false;
+    if (!stored) return;
     recruiterListingDraftId = record.id;
-    setRecruiterStatus(forceDraft ? "Draft saved in this browser only." : "Listing saved in this browser only. It has not been published publicly or verified.");
-    renderRecruiterPortal();
+    setRecruiterStatus(status === "Draft" ? "Draft saved in this browser only." :
+      status === "Published" ? "Published to this browser’s job explorer only. This listing is not verified or shared with other visitors." :
+        "Listing saved in this browser only.");
+    refreshPublishedJobs();
+    var preview = document.getElementById("recruiter-preview");
+    if (preview) preview.hidden = true;
+    if (recruiterForm) recruiterForm.hidden = false;
     showRecruiterRoute("listings");
   }
 
@@ -1402,13 +3487,148 @@
     var remaining = listings.filter(function (entry) { return entry.id !== listingId; });
     if (!writeRecruiterListings(remaining)) return;
     setRecruiterStatus("Listing deleted from this browser.");
-    renderRecruiterPortal();
+    refreshPublishedJobs();
   }
+
+  function readRecruiterFormRecord() {
+    var existing = readRecruiterListings();
+    var prior = existing && existing.find(function (listing) { return listing.id === recruiterListingDraftId; });
+    return collectRecruiterFormData(prior ? prior.status : "Draft", prior || null);
+  }
+
+  function renderRecruiterPreview(record) {
+    var preview = document.getElementById("recruiter-preview");
+    var content = document.getElementById("recruiter-preview-content");
+    if (!preview || !content) return;
+    content.textContent = "";
+    var title = document.createElement("h3");
+    title.textContent = record.title || "Untitled job";
+    content.appendChild(title);
+    var company = document.createElement("p");
+    company.className = "recruiter-preview__company";
+    company.textContent = record.company || "Company not provided";
+    content.appendChild(company);
+    [
+      ["Location", record.location],
+      ["Work mode", record.workMode],
+      ["Job type", record.jobType],
+      ["Experience level", record.experience],
+      ["Eligibility", record.eligibility],
+      ["Deadline", record.deadline ? formatRecruiterDate(record.deadline + "T00:00:00") : ""],
+      ["Required skills", record.requiredSkills.join(", ")],
+      ["Salary", record.salaryMin && record.salaryMax ?
+        (record.salaryCurrency + " " + record.salaryMin + "–" + record.salaryMax + " per " + record.salaryPeriod) : ""]
+    ].forEach(function (pair) {
+      if (!pair[1]) return;
+      var p = document.createElement("p");
+      var label = document.createElement("strong");
+      label.textContent = pair[0] + ": ";
+      p.appendChild(label);
+      p.appendChild(document.createTextNode(pair[1]));
+      content.appendChild(p);
+    });
+    var description = document.createElement("div");
+    description.className = "recruiter-preview__description";
+    Jobs.paragraphs(record.description).forEach(function (paragraph) {
+      var p = document.createElement("p");
+      p.textContent = paragraph;
+      description.appendChild(p);
+    });
+    if (!record.description) description.textContent = "No description provided yet.";
+    content.appendChild(description);
+    var disclosure = document.createElement("p");
+    disclosure.className = "recruiter-listing__note";
+    disclosure.textContent = "Local demo preview. This is not verified or publicly hosted.";
+    content.appendChild(disclosure);
+    recruiterForm.hidden = true;
+    preview.hidden = false;
+    preview.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
+  }
+
+  function transitionRecruiterListing(listingId, nextStatus) {
+    var listings = getCurrentRecruiterListings();
+    if (!listings) return;
+    var listing = listings.find(function (item) { return item.id === listingId; });
+    if (!listing) return;
+    if (nextStatus === "Published") {
+      if (listing.status === "Expired") {
+        setRecruiterStatus("Use Reconfirm Vacancy to explicitly review an expired listing.");
+        return;
+      }
+      openRecruiterListingEditor(listingId);
+      saveRecruiterListing("Published");
+      return;
+    }
+    if (nextStatus !== "Closed" && nextStatus !== "Unpublished") return;
+    var confirmation = nextStatus === "Closed"
+      ? 'Close "' + listing.title + '"? It will be removed from active explorer results.'
+      : 'Unpublish "' + listing.title + '"? It will be removed from the job explorer.';
+    if (!window.confirm(confirmation)) return;
+    var updated = listings.map(function (item) {
+      if (item.id !== listingId) return item;
+      item.status = nextStatus;
+      var at = new Date().toISOString();
+      item.updatedAt = at;
+      addRecruiterActivity(item, nextStatus === "Closed" ? "closed" : "unpublished", at);
+      return item;
+    });
+    if (!writeRecruiterListings(updated)) return;
+    setRecruiterStatus('Listing marked ' + nextStatus + ' in this browser.');
+    refreshPublishedJobs();
+  }
+
+  function reconfirmRecruiterListing(listingId) {
+    var listings = getCurrentRecruiterListings();
+    if (!listings) return;
+    var listing = listings.find(function (item) { return item.id === listingId; });
+    if (!listing || (listing.status !== "Published" && listing.status !== "Expired")) return;
+    var expired = listing.status === "Expired";
+    var prompt = expired
+      ? 'Reconfirm that "' + listing.title + '" is still an active vacancy? This will restore it to this browser’s job explorer for another 15-day review window.'
+      : 'Reconfirm that "' + listing.title + '" is still an active vacancy? This records recruiter activity and restarts its 15-day review window.';
+    if (!window.confirm(prompt)) return;
+    var at = new Date().toISOString();
+    listing.status = "Published";
+    listing.publishedAt = listing.publishedAt || at;
+    listing.updatedAt = at;
+    addRecruiterActivity(listing, "reconfirmed", at);
+    if (!writeRecruiterListings(listings)) return;
+    setRecruiterStatus("Vacancy reconfirmed in this browser. It is not verified or shared.");
+    refreshPublishedJobs();
+  }
+
+  var previewButton = document.getElementById("recruiter-preview-job");
+  if (previewButton) previewButton.addEventListener("click", function () {
+    var errors = recruiterListingErrors(false);
+    recruiterFieldIds.forEach(function (id) { clearFieldError(id); });
+    markFormErrors(recruiterForm, errors);
+    if (Object.keys(errors).length) {
+      setRecruiterStatus("Fix invalid dates, salary range, or application URL before previewing.");
+      return;
+    }
+    renderRecruiterPreview(readRecruiterFormRecord());
+  });
+  var previewBack = document.getElementById("recruiter-preview-back");
+  if (previewBack) previewBack.addEventListener("click", function () {
+    var preview = document.getElementById("recruiter-preview");
+    if (preview) preview.hidden = true;
+    recruiterForm.hidden = false;
+    document.getElementById("recruiter-job-title").focus();
+  });
+  var previewPublish = document.getElementById("recruiter-preview-publish");
+  if (previewPublish) previewPublish.addEventListener("click", function () { saveRecruiterListing("Published"); });
 
   if (recruiterForm) {
     recruiterForm.addEventListener("submit", function (event) {
       event.preventDefault();
-      saveRecruiterListing(false);
+      var publishButton = document.getElementById("recruiter-save-listing");
+      var status = "Published";
+      if (publishButton && publishButton.dataset.saveMode === "update") {
+        var listings = readRecruiterListings();
+        var current = listings && listings.find(function (listing) { return listing.id === recruiterListingDraftId; });
+        if (current) status = current.status;
+      }
+      saveRecruiterListing(status);
     });
     recruiterFieldIds.forEach(function (id) {
       var field = document.getElementById(id);
@@ -1417,15 +3637,43 @@
     });
   }
   var recruiterSaveDraft = document.getElementById("recruiter-save-draft");
-  if (recruiterSaveDraft) recruiterSaveDraft.addEventListener("click", function () { saveRecruiterListing(true); });
+  if (recruiterSaveDraft) recruiterSaveDraft.addEventListener("click", function () { saveRecruiterListing("Draft"); });
+  var listingSearch = document.getElementById("recruiter-listing-search");
+  var listingFilter = document.getElementById("recruiter-listing-filter");
+  if (listingSearch) listingSearch.addEventListener("input", renderRecruiterPortal);
+  if (listingFilter) listingFilter.addEventListener("change", renderRecruiterPortal);
+  ["recruiter-applicant-search", "recruiter-applicant-job-filter", "recruiter-applicant-status-filter"].forEach(function (id) {
+    var control = document.getElementById(id);
+    if (control) control.addEventListener(control.tagName === "SELECT" ? "change" : "input", function () {
+      renderRecruiterApplicants(readRecruiterListings());
+    });
+  });
   renderRecruiterPortal();
   window.addEventListener("storage", function (event) {
-    if (event.key === RECRUITER_LISTINGS_KEY) renderRecruiterPortal();
+    if (event.key === RECRUITER_LISTINGS_KEY) {
+      renderRecruiterPortal();
+      refreshPublishedJobs();
+    }
+    if (event.key === COMPANY_PROFILE_KEY) {
+      renderCompanyTrustCenter();
+      refreshPublishedJobs();
+    }
+    if (event.key === AUTH_PROFILE_KEY) renderRecruiterApplicants(readRecruiterListings());
+  });
+
+  var companyProfileSave = document.getElementById("company-profile-save");
+  if (companyProfileSave) companyProfileSave.addEventListener("click", function () { saveCompanyProfile(false); });
+  var companyVerificationSubmit = document.getElementById("company-verification-submit");
+  if (companyVerificationSubmit) companyVerificationSubmit.addEventListener("click", function () { saveCompanyProfile(true); });
+  ["company-profile-name", "company-profile-website", "company-profile-domain", "company-profile-links"].forEach(function (id) {
+    var field = document.getElementById(id);
+    if (field) field.addEventListener("input", function () { clearFieldError(id); });
   });
 
   document.addEventListener("click", function (event) {
     var recruiterRouteButton = event.target.closest("[data-recruiter-route]");
     if (recruiterRouteButton) {
+      if (["dashboard", "listings"].indexOf(recruiterRouteButton.dataset.recruiterRoute) >= 0) resetRecruiterForm();
       showRecruiterRoute(recruiterRouteButton.dataset.recruiterRoute);
       return;
     }
@@ -1444,6 +3692,52 @@
       deleteRecruiterListing(recruiterDeleteButton.dataset.recruiterDelete);
       return;
     }
+    var recruiterPreviewButton = event.target.closest("[data-recruiter-preview]");
+    if (recruiterPreviewButton) {
+      openRecruiterListingEditor(recruiterPreviewButton.dataset.recruiterPreview);
+      renderRecruiterPreview(readRecruiterFormRecord());
+      return;
+    }
+    var recruiterStatusButton = event.target.closest("[data-recruiter-status]");
+    if (recruiterStatusButton) {
+      transitionRecruiterListing(recruiterStatusButton.dataset.recruiterStatus, recruiterStatusButton.dataset.nextStatus);
+      return;
+    }
+    var recruiterReconfirmButton = event.target.closest("[data-recruiter-reconfirm]");
+    if (recruiterReconfirmButton) {
+      reconfirmRecruiterListing(recruiterReconfirmButton.dataset.recruiterReconfirm);
+      return;
+    }
+    var recruiterApplicationSave = event.target.closest("[data-recruiter-app-save]");
+    if (recruiterApplicationSave) {
+      saveRecruiterApplicantStatus(recruiterApplicationSave.dataset.recruiterAppSave);
+      return;
+    }
+    var recruiterCandidateDetailsButton = event.target.closest("[data-recruiter-candidate-details]");
+    if (recruiterCandidateDetailsButton) {
+      var details = recruiterCandidateDetailsButton.closest(".recruiter-applicant").querySelector(".recruiter-candidate");
+      var expanded = recruiterCandidateDetailsButton.getAttribute("aria-expanded") === "true";
+      var applicantId = recruiterCandidateDetailsButton.closest(".recruiter-applicant").querySelector("[data-recruiter-app-save]").dataset.recruiterAppSave;
+      if (!expanded) recordRecruiterApplicationReview(applicantId);
+      recruiterCandidateDetailsButton.setAttribute("aria-expanded", String(!expanded));
+      recruiterCandidateDetailsButton.textContent = expanded ? "Candidate details" : "Hide candidate details";
+      if (details) details.hidden = expanded;
+      if (!expanded) {
+        renderRecruiterPortal();
+        var currentCard = Array.prototype.filter.call(document.querySelectorAll(".recruiter-applicant"), function (card) {
+          var save = card.querySelector("[data-recruiter-app-save]");
+          return save && save.dataset.recruiterAppSave === applicantId;
+        })[0];
+        if (currentCard) {
+          var currentButton = currentCard.querySelector("[data-recruiter-candidate-details]");
+          var currentDetails = currentCard.querySelector(".recruiter-candidate");
+          currentButton.setAttribute("aria-expanded", "true");
+          currentButton.textContent = "Hide candidate details";
+          currentDetails.hidden = false;
+        }
+      }
+      return;
+    }
     var routeButton = event.target.closest("[data-student-route]");
     if (routeButton) {
       var route = routeButton.dataset.studentRoute;
@@ -1456,6 +3750,49 @@
       showStudentRoute(route);
       if (route === "dashboard") renderStudentDashboard();
       if (route === "profile") loadStudentProfileIntoForm();
+      if (route === "applications") renderStudentApplicationLists();
+      if (route === "defense") renderStudentDefense();
+      return;
+    }
+
+    var projectDefenseButton = event.target.closest("[data-student-project-defense]");
+    if (projectDefenseButton) {
+      showStudentRoute("defense");
+      renderStudentDefense();
+      var defensePicker = document.getElementById("student-defense-project");
+      defensePicker.value = projectDefenseButton.dataset.studentProjectDefense;
+      startStudentDefense(defensePicker.value);
+      return;
+    }
+
+    var savedDefenseButton = event.target.closest("[data-defense-open]");
+    if (savedDefenseButton) {
+      activeDefenseSessionId = savedDefenseButton.dataset.defenseOpen;
+      renderStudentDefense();
+      return;
+    }
+
+    var applicationAdd = event.target.closest("[data-student-application-add]");
+    if (applicationAdd) {
+      openStudentApplicationForm("", "", false);
+      return;
+    }
+
+    var applicationEdit = event.target.closest("[data-student-application-edit]");
+    if (applicationEdit) {
+      openStudentApplicationForm(applicationEdit.dataset.studentApplicationEdit, "", false);
+      return;
+    }
+
+    var duplicateApplicationEdit = event.target.closest("#student-application-duplicate-edit");
+    if (duplicateApplicationEdit && duplicateApplicationEdit.dataset.studentApplicationDuplicateEdit) {
+      openStudentApplicationForm(duplicateApplicationEdit.dataset.studentApplicationDuplicateEdit, "", false);
+      return;
+    }
+
+    var applicationDelete = event.target.closest("[data-student-application-delete]");
+    if (applicationDelete) {
+      deleteStudentApplication(applicationDelete.dataset.studentApplicationDelete);
       return;
     }
 
@@ -1495,6 +3832,18 @@
   if (studentSkillAdd) {
     studentSkillAdd.addEventListener("click", addSkillToProfile);
   }
+  var studentSkillName = document.getElementById("student-skill-name");
+  if (studentSkillName) {
+    studentSkillName.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addSkillToProfile();
+      }
+    });
+    studentSkillName.addEventListener("input", function () {
+      setStudentSkillMessage("", false);
+    });
+  }
 
   var studentProjectSave = document.getElementById("student-project-save");
   if (studentProjectSave) {
@@ -1529,9 +3878,31 @@
     return;
   }
 
-  var allJobs = Jobs.normalizeAll((window.NEXORA_DEMO && window.NEXORA_DEMO.opportunities) || []);
+  var baseJobs = Jobs.normalizeAll((window.NEXORA_DEMO && window.NEXORA_DEMO.opportunities) || []);
+  var allJobs = baseJobs.concat(getPublishedRecruiterJobs(baseJobs));
   var state = Jobs.defaultState();
   var support = Jobs.sortSupport(allJobs);
+
+  function refreshPublishedJobs() {
+    allJobs = baseJobs.concat(getPublishedRecruiterJobs(baseJobs));
+    support = Jobs.sortSupport(allJobs);
+    saved = cleanSavedJobIds(saved, allJobs);
+    buildControls();
+    render();
+    renderStudentDashboard();
+    renderRecruiterPortal();
+  }
+
+  window.setInterval(function () {
+    var previous = readRecruiterListings();
+    var current = getCurrentRecruiterListings();
+    if (!current) return;
+    var newlyExpired = previous && current.some(function (listing) {
+      return listing.status === "Expired" && previous.some(function (old) { return old.id === listing.id && old.status === "Published"; });
+    });
+    if (newlyExpired) refreshPublishedJobs();
+    else renderRecruiterPortal();
+  }, 60000);
 
   var form = $("#search-form");
   var keywordInput = opt("#search-keyword", "input");
@@ -1579,7 +3950,7 @@
   }
   function loadSaved() {
     var raw = readStorage();
-    if (raw !== null) saved = Jobs.cleanSavedIds(raw, allJobs);   /* on a read failure keep what we have in memory */
+    if (raw !== null) saved = cleanSavedJobIds(raw, allJobs);   /* on a read failure keep what we have in memory */
   }
   loadSaved();
   if (typeof renderStudentDashboard === "function") renderStudentDashboard();
@@ -1658,7 +4029,10 @@
       return '<li class="card opp">' +
         '<div class="opp__top">' +
           '<span class="opp__mark" aria-hidden="true">' + escapeHtml(firstChar(o.company)) + "</span>" +
-          '<div><div class="opp__company">' + escapeHtml(o.company) + "</div>" + statusBadge(o) + "</div>" +
+          '<div><div class="opp__company">' + escapeHtml(o.company) + "</div>" + statusBadge(o) +
+            (o.source === "recruiter-local-demo" ? '<span class="badge badge--outline recruiter-local-badge">Local demo</span>' : "") +
+            '<span class="badge badge--outline trust-badge trust-badge--' + companyTrustClass(o.companyTrustStatus || "Not Submitted") + '">' +
+              escapeHtml(companyTrustLabel(o.companyTrustStatus || "Not Submitted")) + '</span></div>' +
           '<button class="opp__save" type="button" data-save="' + o.id + '" aria-pressed="' + isSaved + '" aria-label="Bookmark: ' + escapeHtml(o.title) + '">' + icon("bookmark") + "</button>" +
         "</div>" +
         '<h3 class="opp__title">' + escapeHtml(o.title) + "</h3>" +
@@ -1798,7 +4172,7 @@
      in the Saved-only view the list itself changes, so it is re-rendered. */
   function toggleSaved(id, quiet) {
     var latest = readStorage();                       /* pick up changes made in another tab before writing */
-    if (latest !== null) saved = Jobs.cleanSavedIds(latest, allJobs);
+    if (latest !== null) saved = cleanSavedJobIds(latest, allJobs);
     var idx = saved.indexOf(id);
     var adding = idx === -1;
     if (adding) saved.push(id); else saved.splice(idx, 1);
@@ -1840,6 +4214,15 @@
 
   /* Same-browser changes made in another tab keep this tab's bookmarks in step. */
   window.addEventListener("storage", function (e) {
+    if (e.key === AUTH_PROFILE_KEY) {
+      renderStudentDashboard();
+      renderStudentApplicationLists();
+      renderStudentSkillEditor();
+      renderStudentProjectEditor();
+      renderStudentDefense();
+      renderRecruiterApplicants(getCurrentRecruiterListings());
+      return;
+    }
     if (e.key !== null && e.key !== SAVED_KEY) return;
     loadSaved();
     render();
@@ -1896,6 +4279,7 @@
   function statusNote(o) {
     if (o.status === "DEMO") return "This is a demo listing from a fictional company, shown to illustrate how NEXORA will look. It is not a real vacancy and it cannot accept an application.";
     if (o.status === "VERIFIED") return "NEXORA holds evidence for this listing (see the verification link below). NEXORA does not accept applications itself yet. Applications are made on the employer’s own website.";
+    if (o.source === "recruiter-local-demo") return "This listing was entered in a browser-local demo workspace. NEXORA has not verified the employer or vacancy, and this record is not shared with other visitors. If an official URL was provided, review its destination carefully before continuing.";
     return "NEXORA has not verified this listing or the employer. Check the employer’s own website before you share personal details. NEXORA does not accept applications itself yet.";
   }
 
@@ -1909,6 +4293,7 @@
     var who = el("div");
     who.appendChild(el("div", "opp__company", o.company));
     who.appendChild(statusBadgeEl(o));
+    if (o.source === "recruiter-local-demo") who.appendChild(el("span", "badge badge--outline recruiter-local-badge", "Local demo listing"));
     head.appendChild(mark);
     head.appendChild(who);
     view.appendChild(head);
@@ -1936,6 +4321,8 @@
     var note = el("p", "jv__note jv__note--" + (o.status === "DEMO" ? "demo" : o.status === "UNVERIFIED" ? "caution" : "verified"), statusNote(o));
     note.id = "jv-summary";
     view.appendChild(note);
+    var companyTrustPanel = buildCompanyTrustPanel(o);
+    if (companyTrustPanel) view.appendChild(companyTrustPanel);
     if (o.status === "VERIFIED" && o.evidenceUrl) {
       var ev = el("a", "link", "See verification evidence (opens in a new tab)");
       ev.href = o.evidenceUrl; ev.target = "_blank"; ev.rel = "noopener noreferrer";
@@ -1968,6 +4355,7 @@
     var apply = el("div", "jv__apply");
     var msg;
     if (dest.kind === "demo") msg = "This is a demonstration listing, so Apply Now does not start a real application.";
+    else if (dest.kind === "none" && o.source === "recruiter-local-demo") msg = "The recruiter has not supplied a usable external application link for this local demo listing.";
     else if (dest.kind === "none") msg = "An official application destination is not currently available for this listing.";
     else msg = "Applications for this role are made on the employer’s own website (" + dest.host + "). You will be asked to review before you leave NEXORA.";
     var msgEl = el("p", null, msg);
@@ -2005,6 +4393,51 @@
     dl.appendChild(dd);
   }
 
+  function buildCompanyTrustPanel(job) {
+    var isRecruiterListing = job.source === "recruiter-local-demo";
+    var trustStatus = isRecruiterListing ? job.companyTrustStatus : "Not Submitted";
+    var section = el("section", "jv__trust");
+    var heading = el("h3", null, "Company Trust Center");
+    section.appendChild(heading);
+    var badge = el("span", "badge badge--outline trust-badge trust-badge--" + companyTrustClass(trustStatus), companyTrustLabel(trustStatus));
+    section.appendChild(badge);
+    section.appendChild(el("p", "jv__missing", companyTrustExplanation(trustStatus)));
+    var details = el("dl", "jv__summary");
+    summaryRow(details, "Company", job.company);
+    if (isRecruiterListing && job.companyWebsite) {
+      var website = el("a", "link", job.companyWebsite);
+      website.href = job.companyWebsite;
+      website.target = "_blank";
+      website.rel = "noopener noreferrer";
+      summaryRow(details, "Official website provided", website);
+    }
+    if (isRecruiterListing && job.companyEmailDomain) summaryRow(details, "Business email domain provided", job.companyEmailDomain);
+    if (isRecruiterListing && job.companyIndustry) summaryRow(details, "Industry", job.companyIndustry);
+    if (isRecruiterListing && job.companyLocation) summaryRow(details, "Company location", job.companyLocation);
+    if (isRecruiterListing && job.companyDescription) summaryRow(details, "About the company", job.companyDescription);
+    if (isRecruiterListing && job.companyPublicLinks && job.companyPublicLinks.length) {
+      var links = el("div", "trust-links");
+      job.companyPublicLinks.forEach(function (url) {
+        if (!isHttpUrl(url)) return;
+        var link = el("a", "link", new URL(url).hostname);
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        links.appendChild(link);
+      });
+      if (links.childNodes.length) summaryRow(details, "Public links provided", links);
+    }
+    section.appendChild(details);
+    section.appendChild(el("p", "jv__note jv__note--caution", "A company website or email domain is not conclusive proof. Trust status is separate from job publication and recruiter activity."));
+    var report = el("button", "btn btn--text", "Report this job or recruiter");
+    report.type = "button";
+    report.dataset.action = "report-open";
+    report.setAttribute("aria-expanded", "false");
+    report.setAttribute("aria-controls", "jv-report-form");
+    section.appendChild(report);
+    return section;
+  }
+
   /* Review step: shown only when a safe official URL exists. It is a confirmation, not a form: it asks for nothing. */
   function buildReviewView(d) {
     var o = d.job, dest = d.dest;
@@ -2037,6 +4470,11 @@
     go.appendChild(label);
     go.appendChild(iconEl("external"));
     actions.appendChild(go);
+    var record = el("button", "btn btn--secondary btn--lg", "I've applied · record it");
+    record.type = "button";
+    record.dataset.action = "track-application";
+    record.setAttribute("aria-label", "I've applied; open the local tracker to record this application");
+    actions.appendChild(record);
     var cancel = el("button", "btn btn--secondary btn--lg", "Cancel");
     cancel.type = "button"; cancel.dataset.action = "back"; cancel.id = "jv-cancel";
     actions.appendChild(cancel);
@@ -2131,6 +4569,17 @@
         setStatus(msg);
         break;
       case "back": showView("details"); break;
+      case "track-application":
+        var applicationJobId = detail.job.id;
+        closeDialog();
+        openStudentApplicationForm("", applicationJobId, true);
+        break;
+      case "report-open":
+        openJobReportForm(detail.job, btn);
+        break;
+      case "report-submit":
+        saveJobReport(detail.job);
+        break;
       case "close": closeDialog(); break;
     }
   });
