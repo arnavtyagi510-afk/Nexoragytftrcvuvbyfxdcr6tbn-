@@ -1,5 +1,51 @@
 # NEXORA — Progress
 
+## Phase 5.3 — Fake Job/Recruiter Reports, Review Queue & Scam Warnings — STATUS: COMPLETE (browser-local demo scope)
+
+### Features implemented
+- Added Report Job actions to listing cards and job details, plus Report Recruiter in job details. The form supports the six requested report reasons, optional explanation, required-reason validation, local confirmation, and duplicate prevention by target/reason.
+- Extended the existing `nexora:demo-job-reports` store instead of adding a parallel report database. Existing Submitted records normalize to Pending; new records carry target/job/company context and timestamps.
+- Added a distinct `#demo-review-queue` demo route with Pending, Under Review, Resolved, and Dismissed filters; status changes update the shared local report data immediately. Resolve and Dismiss require confirmation.
+- Listing and detail warnings appear only while a matching report is Under Review. Warnings are non-accusatory, include safety advice, and are removed when the report is Resolved or Dismissed. Pending reports do not imply fraud.
+- The queue is intentionally not linked as a normal admin feature and clearly states that it is not authenticated or tamper-proof. It is not a production moderation workflow.
+
+### Files changed
+`index.html`, `assets/js/main.js`, `assets/css/components.css`, `assets/css/home.css`, `README.md`, `PROJECT_CONTEXT.md`, `PROGRESS.md`, `TEST_REPORT.md`.
+
+### Validation status
+- Integrated-browser checks — PASS for the exercised flows: initially empty review queue; required-reason validation; job report submission and duplicate rejection; recruiter report submission and duplicate rejection; Pending/Under Review/Resolved/Dismissed filters; Mark Under Review, Resolve, and Dismiss actions with their status feedback/confirmation; warning shown on listing/details while Under Review and absent after resolution; status persistence after reload; and 390px viewport layout without horizontal overflow.
+- `node --check assets\js\main.js` — PASS.
+- Python standard-library HTML parse / duplicate-ID check — PASS; 363 IDs, none duplicated.
+- No build, lint, or type-check command is configured for this plain HTML/CSS/JavaScript project. The optional Python Playwright suite was not run in this validation.
+
+### Limitations and remaining manual checks
+- Reports and moderation statuses are browser-local and editable by anyone with access to that browser. There is no authenticated admin role, reviewer attribution, backend, real investigation, notification, enforcement, or cross-device sync.
+- A report marked Under Review is only a local workflow state, not a credibility determination. Production moderation requires an authorized review process and server-side persistence/permissions.
+- Physical-device, cross-browser, keyboard-only, and screen-reader checks remain manual.
+
+## Phase 4, Step 4.4 — Transparent Job Matching & Recommendations — STATUS: COMPLETE (browser-local demo scope)
+
+### Features implemented
+- Added a **Recommended Opportunities** dashboard panel using current Job Explorer listings and saved student profile fields; empty profiles get a profile-completion prompt and skill-light profiles receive only low matches where other saved preferences support them.
+- Added a deterministic 0–100 score with visible, documented 50/20/20/10 components for required-skill coverage, relevant saved projects, explicitly assessable eligibility, and role/headline/interests plus opportunity-type/work-mode/location preferences. Missing requirements and unknown eligibility do not earn points; empty skill requirements earn no skill points.
+- Added matching/missing skill summaries, relevant project names, eligibility explanations and clear DEMO / external-application-link labels. Unsupported or incomplete eligibility remains Unknown; the UI does not claim an employer decision.
+- Added available-data-driven type/category filters, DEMO/external-link filters, and best-match sorting. Reused the existing bookmark store and handlers, Job Explorer detail/Apply Now flow, and Step 4.3 analyzer job selector without generating a duplicate roadmap.
+- Recommendations rerender from the current profile and active listing data. No new storage key, dependency, backend, AI provider, or fabricated opportunity was introduced. UI uses existing forest-green/ivory/sage tokens and responsive layouts.
+
+### Files changed
+`index.html`, `assets/js/main.js`, `assets/css/components.css`, `README.md`, `PROJECT_CONTEXT.md`, `PROGRESS.md`, `TEST_REPORT.md`.
+
+### Validation status
+- Integrated-browser checks — PASS: matching/missing skills and relevant project evidence; numeric scores clamped to 0–100; profile edit and skill changes reordered recommendations; no-skill profile stayed low match (maximum 4% in the tested fixture); a name-only profile showed the complete-profile prompt; a listing with no skill requirements earned no skill points and remained below 50%; education eligibility was shown as Satisfied, Unmet, or Unknown according to recorded/profile data; type and category filters; DEMO/external-link labels and filtering; bookmark synchronization to Job Explorer; job details and demo Apply Now remained honest and created no application; job-specific Skill Gap Analyzer selection; reload persistence of bookmarks, applications, and recruiter listings; 390px viewport had no horizontal overflow.
+- `node --check assets/js/main.js` — PASS.
+- Python standard-library HTML parse / duplicate-ID check — PASS; 357 IDs, none duplicated.
+- `python tests\regression_test.py` — NOT RUN: could not start because Python Playwright is unavailable (`ModuleNotFoundError`).
+
+### Known limitations and remaining checks
+- Recommendations are rule-based comparisons using only saved/local fields and current local listing records. Scores are not objective ability, employer eligibility, or a hiring guarantee. Only a narrow set of education criteria can be compared; other criteria stay Unknown.
+- Current opportunities are demo/local and browser storage does not sync across users/devices. Filters are not persisted. No real AI, backend, live market data, or external Apply Now submission is present.
+- No physical-device, cross-browser, keyboard-only, or screen-reader testing was performed; those remain manual checks.
+
 ## Phase 4, Step 4.3 — Skill Gap Analyzer & Personalized Learning Roadmap — STATUS: COMPLETE (browser-local demo scope)
 
 ### Features implemented

@@ -1,5 +1,60 @@
 # NEXORA — Test Report
 
+## Phase 5.3 — Job/recruiter reports, review queue, and warnings
+
+### Integrated-browser checks performed
+
+Checks used temporary browser-local test records. The original values for the six affected localStorage keys were captured and restored afterward; the temporary sessionStorage backup was removed.
+
+- Opened the review route before submitting a report and confirmed the empty-queue state.
+- Submitted with no reason selected and confirmed validation prevented saving. Submitted a job report and confirmed the report appeared in the existing local report store as Pending with its job context and explanation. A second submission for the same target/reason was rejected as a duplicate.
+- Submitted a Recruiter report for the listing's associated company, confirmed its target type/company context and Pending status, and confirmed duplicate rejection for the same recruiter/reason.
+- Changed the job report to Under Review and confirmed the report appeared under that filter, the listing showed a warning, and job details displayed the non-accusatory explanation and safety guidance. Pending did not produce a warning.
+- Resolved the job report and dismissed the recruiter report using the confirmation prompts. Confirmed Resolved and Dismissed filters each showed one report, Pending and Under Review showed none, and the listing/detail warning was gone after resolution.
+- Reloaded the page and confirmed Resolved and Dismissed statuses persisted.
+- At a 390px viewport, the review queue had no horizontal document overflow (390px viewport; 375px document scroll width), and a job details dialog remained within the viewport (about 358px wide; 390px document width).
+
+### Static checks
+
+- `node --check assets\js\main.js` — PASS.
+- Python standard-library HTML parse / duplicate-ID check — PASS; 363 IDs, none duplicated.
+- Build/lint/type checks — not configured in this project. The optional Python Playwright suite was not run in this validation.
+
+### Limits and manual checks
+
+- Browser checks exercised the browser-local demo only. They do not establish authenticated admin access, secure storage, reviewer identity, real investigation, cross-device synchronization, or production fraud prevention.
+- Physical-device, cross-browser, keyboard-only, and screen-reader testing remains manual.
+
+# Phase 4, Step 4.4 — Transparent Job Matching & Recommendations
+
+### Integrated-browser checks performed
+
+Ran against the local `file://` page with temporary profile, bookmark, and recruiter-listing fixtures. The original localStorage values were captured for restoration.
+
+- A profile with React and JavaScript, a saved Dashboard project using those technologies, and a Frontend Developer preference displayed matching skills, missing CSS, relevant project evidence, a numeric score, and Unknown eligibility because the listing's available experience/eligibility data could not be established from the profile.
+- Edited desired role, interests, type, work mode, and location through the existing student profile UI, then added SQL, Excel, and Python through its skill editor. The highest recommendation changed to **Data Analyst Intern** (57% in this fixture), and its skill list reflected the updated profile without a separate recommendation store.
+- A profile with no skills but a saved Data Analyst role returned only low scores (maximum 4% in this fixture), while a name-only profile showed the complete-profile prompt rather than generated matches.
+- Checked explicit listing criteria: a Bachelor's-degree-only criterion against a saved Undergraduate level displayed **Unmet**; unparseable eligibility text and absent criteria displayed **Unknown**; currently enrolled Undergraduate with a saved college displayed **Satisfied**. No status was presented as an employer decision.
+- A listing with no recorded skills showed “No skill requirements recorded,” received no skill points, and remained below 50% in the test fixture.
+- Filtered by type and category; every result in the Internship type-filter run was labelled Internship, and the Design category returned only UI/UX Design Intern. The external-application-link filter returned the temporary recruiter DEMO fixture with an external link, labelled as both a local DEMO listing and an external destination.
+- Saved a recommendation and confirmed its ID appeared in the existing `nexora:demo-saved` data and the Job Explorer bookmark control had `aria-pressed=true`. The existing application tracker record remained present.
+- Opened recommended job details and used Apply Now on a shipped DEMO listing; the existing dialog explained that it was fictional and no application was sent or saved. The application count remained unchanged.
+- Used “Compare skill gaps” to set the Step 4.3 analyzer to job mode and the selected existing listing ID; it did not auto-run or overwrite the existing roadmap.
+- Reloaded the page and confirmed saved bookmarks, the student application, and recruiter listing fixtures remained in browser storage. At a 390px viewport, document client and scroll widths both measured 390px.
+
+### Static and automated checks
+
+- `node --check assets\js\main.js` — PASS.
+- Python standard-library HTML parser — PASS; 357 IDs, none duplicated.
+- `python tests\regression_test.py` — NOT RUN: could not start because Python Playwright is unavailable (`ModuleNotFoundError: No module named 'playwright'`).
+
+### Test iteration notes and remaining checks
+
+- One browser automation locator initially matched multiple “Profile” navigation and CTA controls; the rerun explicitly targeted the sidebar navigation. An initial type-filter expectation included a Job listing by mistake; corrected verification checked the displayed type for every filtered card. Corrected checks passed.
+- The first immediate bookmark-sync check found the Job Explorer button's `aria-pressed` state stayed stale when a job was saved from Recommendations. The handler now refreshes the existing explorer controls (or rerenders its Saved-only results) and restores focus to the recommendation button; rerun confirmed the saved ID and `aria-pressed=true` immediately.
+- Browser checks used temporary local DEMO fixtures (including a `example.com` external-link sample); no actual external application site was opened. Original local storage is restored after this report's final browser cleanup.
+- No physical-device, cross-browser, keyboard-only, or screen-reader test was performed. The recommendation formula cannot determine professional eligibility beyond a narrow saved education comparison, and all local data remains unsynchronized.
+
 # Phase 4, Step 4.3 — Skill Gap Analyzer & Personalized Learning Roadmap
 
 ### Integrated-browser checks performed
