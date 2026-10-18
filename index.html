@@ -757,6 +757,50 @@
                 </div>
 
                 <div class="field-group field-group--full">
+                  <label>Skill evidence &amp; verification</label>
+                  <p class="student-item__meta">Add optional links, repository URLs, portfolio references, or project details. These remain student-submitted evidence until a reviewer marks a skill Verified or Rejected / More Evidence Needed.</p>
+                  <div class="student-form-grid">
+                    <div class="field-group">
+                      <label for="student-skill-evidence-skill">Skill</label>
+                      <select class="select" id="student-skill-evidence-skill" aria-label="Choose a skill for evidence">
+                        <option value="">Choose a skill</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label for="student-skill-evidence-type">Evidence type</label>
+                      <select class="select" id="student-skill-evidence-type">
+                        <option value="project">Project link</option>
+                        <option value="github">GitHub repository</option>
+                        <option value="portfolio">Portfolio or public work</option>
+                        <option value="other">Other URL</option>
+                      </select>
+                    </div>
+                    <div class="field-group field-group--full">
+                      <label for="student-skill-evidence-url">Evidence URL (optional if a description is provided)</label>
+                      <input class="input" id="student-skill-evidence-url" type="url" inputmode="url" placeholder="https://github.com/yourname/project">
+                    </div>
+                    <div class="field-group field-group--full">
+                      <label for="student-skill-evidence-description">Project description or evidence summary</label>
+                      <textarea class="input" id="student-skill-evidence-description" rows="3" placeholder="Describe the result, contribution, or proof of work for this skill."></textarea>
+                    </div>
+                    <input type="hidden" id="student-skill-evidence-item" value="">
+                  </div>
+                  <div class="student-form-controls student-form-controls--left">
+                    <button class="btn btn--secondary" type="button" id="student-skill-evidence-clear">Clear</button>
+                    <button class="btn btn--primary" type="button" id="student-skill-evidence-save">Save evidence</button>
+                  </div>
+                  <p class="auth-status" id="student-skill-evidence-status" role="status" aria-live="polite"></p>
+                  <ul class="student-list" id="student-skill-evidence-list" aria-live="polite"></ul>
+                  <ul class="student-list verification-status-legend">
+                    <li><strong>Self-Reported:</strong> A skill is listed without submitted evidence, and it is not treated as independently verified.</li>
+                    <li><strong>Evidence Submitted:</strong> The student added a relevant URL, repository, project link, or description, but this is still not automatically verified.</li>
+                    <li><strong>Under Review:</strong> A reviewer has opened the submission for inspection.</li>
+                    <li><strong>Verified:</strong> A reviewer explicitly marked the skill as verified after local review.</li>
+                    <li><strong>Rejected / More Evidence Needed:</strong> The current evidence was not enough or was not accepted; additional details are needed.</li>
+                  </ul>
+                </div>
+
+                <div class="field-group field-group--full">
                   <label for="student-profile-interests">Career interests or domains</label>
                   <input class="input" id="student-profile-interests" name="careerInterests" type="text" placeholder="Product, AI, Finance, Design">
                 </div>
@@ -822,6 +866,44 @@
                   <label for="student-profile-portfolio">Portfolio URL</label>
                   <input class="input" id="student-profile-portfolio" name="portfolioUrl" type="url" inputmode="url" placeholder="https://yourportfolio.com">
                   <p class="field-error" id="student-profile-portfolio-error" aria-live="polite"></p>
+                </div>
+
+                <div class="field-group field-group--full">
+                  <label>GitHub portfolio</label>
+                  <p class="student-item__meta">Public GitHub repository data is loaded from GitHub's public API when available. If the API is blocked or a repository is deleted, you can still save a valid public repository URL and keep the information you explicitly provided.</p>
+                  <div class="student-form-grid">
+                    <div class="field-group field-group--full">
+                      <label for="student-github-repository-url">Repository URL</label>
+                      <input class="input" id="student-github-repository-url" type="url" inputmode="url" placeholder="https://github.com/yourname/project">
+                    </div>
+                    <div class="field-group">
+                      <label for="student-github-repository-name">Repository name</label>
+                      <input class="input" id="student-github-repository-name" type="text" maxlength="120" placeholder="Project name or repo name">
+                    </div>
+                    <div class="field-group">
+                      <label for="student-github-repository-project">Associate with project</label>
+                      <select class="select" id="student-github-repository-project">
+                        <option value="">Associate with a project (optional)</option>
+                      </select>
+                    </div>
+                    <div class="field-group field-group--full">
+                      <label for="student-github-repository-description">Repository description</label>
+                      <textarea class="input" id="student-github-repository-description" rows="3" maxlength="500" placeholder="Describe what this repository demonstrates."></textarea>
+                    </div>
+                    <div class="field-group field-group--full">
+                      <label for="student-github-repository-skill">Associated skill</label>
+                      <select class="select" id="student-github-repository-skill">
+                        <option value="">Associate with a skill (optional)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="student-form-controls student-form-controls--left">
+                    <button class="btn btn--secondary" type="button" id="student-github-fetch-details">Fetch repo details</button>
+                    <button class="btn btn--primary" type="button" id="student-github-add-repository">Add repository</button>
+                    <button class="btn btn--text" type="button" id="student-github-clear-repository">Clear</button>
+                  </div>
+                  <p class="auth-status" id="student-github-status" role="status" aria-live="polite"></p>
+                  <ul class="student-project-list" id="student-github-repository-list" aria-live="polite"></ul>
                 </div>
               </div>
 
@@ -894,6 +976,13 @@
               <strong id="recruiter-applicant-count">0</strong>
             </article>
           </div>
+          <section class="student-card recruiter-reminder-panel" id="recruiter-reminder-panel">
+            <div class="student-card__head">
+              <h3>Vacancy reminders</h3>
+              <span class="badge badge--sage" id="recruiter-reminder-total">0 active</span>
+            </div>
+            <ul class="recruiter-list recruiter-reminders" id="recruiter-reminder-list"></ul>
+          </section>
           <section class="student-card recruiter-recent">
             <div class="student-card__head">
               <h3>My Job Listings</h3>
@@ -1379,7 +1468,10 @@
             <select class="select" id="admin-review-status-filter">
               <option value="all">All statuses</option>
               <option value="Pending">Pending</option>
+              <option value="Evidence Submitted">Evidence Submitted</option>
               <option value="Under Review">Under Review</option>
+              <option value="Verified">Verified</option>
+              <option value="Rejected / More Evidence Needed">Rejected / More Evidence Needed</option>
               <option value="Resolved">Resolved</option>
               <option value="Dismissed">Dismissed</option>
             </select>
