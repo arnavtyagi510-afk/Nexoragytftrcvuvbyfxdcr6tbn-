@@ -1,0 +1,387 @@
+[
+ {
+  "name": "01 Homepage loads without JavaScript errors",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "01b No failed network requests for local assets",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "02 Search by title",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "03 Search by company",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "04 Search by skill",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "05 Search by location (location box and keyword box)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "06 Enter submits a search",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "07 Clear search restores results",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "08 Each supported filter works (counts per value)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "09 Multiple filters combine correctly (incl. search + filters)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "10 Clear all filters resets all filter state",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "11 Sorting works where supported (Title A-Z; newest/pay disabled, no data)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "12 Result counts remain accurate (singular/plural, zero)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "13 Empty state appears for zero matches, Clear all recovers",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "14 Bookmarks toggle on and off",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "15 Bookmarks persist after refresh (add and remove)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "16 Existing navigation intact (nav links, Soon dialogs, category cards)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "16b Mobile menu opens and closes (button, Escape)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "17 No horizontal overflow at 320/375/414/768/1024/1280 px",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "18 Design preserved: ivory bg, forest-green primary, font stack, header/footer/sections",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "18b All required asset files present",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-26 Remote listing shows 'Remote' once (location duplicate suppressed)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-25 Pure helpers: formatSalary/formatDate/isPast/safeUrl/saved filter/cleanSavedIds",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-01 Shipped demo cards: DEMO badge, type, mode; no invented pay/dates/status",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-02 Experience shown only when known (Entry-level shown; unknown not shown)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-03 View details dialog: honest DEMO text, no apply link, focus returns to button",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-04 Status badges follow evidence: VERIFIED needs evidenceUrl, else shown Unverified; DEMO stays Demo",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-05 Compensation, experience, employment type and dates appear only when known; past deadline flagged",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-06 Injected HTML/javascript: URLs in data are escaped/ignored",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-07 Details links: evidence link only for VERIFIED listings; apply URL hidden until review step; rel=noopener; no 'submitted' claims",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-08 Saved-only view: count label, filters combine, unbookmarking updates list, Clear all resets",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-09 Saved-only with nothing saved shows an honest empty state",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-10 Bookmark button: stable accessible name + aria-pressed, focus kept after toggle",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-11 localStorage holds a plain id array under nexora:demo-saved",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-12 Corrupted / odd stored bookmark data is ignored safely (no errors, valid ids only)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-13 Storage blocked: no errors, bookmarks work for the visit, user is told they won't persist",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-14 Storage write fails (quota): no errors, state kept in memory, user told",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-15 Bookmark changes in another tab are reflected (storage event)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-16 Every button, link, input and select has an accessible name",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-17 Search and filter controls have programmatic labels",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-18 Visible focus indicator (>=2px outline on element or its field wrapper) on key controls",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-19 Keyboard: search, filters, bookmark and details buttons reachable with Tab",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-20 Keyboard: Enter/Space toggle bookmark, Enter opens details, Escape closes",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-21 Semantics: one h1/main, lang, unique ids, labelled navs, skip link, live regions",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-22 Colour contrast of design-token pairs >= 4.5:1 (WCAG AA)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-23 Card and search action buttons are at least 40px in both dimensions",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-27 Emulated touch phone (390px): tap bookmark, details, menu, saved view; no overflow/errors",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "P2-24 Page still runs with no JS errors when optional elements are missing (15 variants)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-01 Shipped DEMO listing: details show its own data, DEMO badge, fictional notice, no links",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-02 DEMO Apply Now: explains it is sample data, stays on NEXORA, no new tab, no record, no 'submitted' claim, Back works",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-03 Every shipped job opens its own, different details",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-04 The selected job is correct after sorting and after filtering",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-05 Closing (X, Close button, backdrop) keeps the search and filters; focus returns to the opener",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-06 Save/unsave from details and cards share one state, persist, and update Saved (N)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-07 Un-saving from details in the Saved-only view: dialog stays correct, list updates, focus lands safely",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-08 No duplicate listeners: after 5 open/close cycles one click toggles exactly once",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-09 Keyboard: focus stays inside the modal, Enter/Space work, Escape closes, scroll lock released, focus restored",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-10 Dialog semantics: labelled by job title, described, named close button, live status, unique ids",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-11 Visible focus ring on dialog X, Apply Now, Save and Close",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-12 No JavaScript errors during shipped-data flows",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-13 Full record shows every known field, multi-paragraph description, optional lists, evidence link; nothing marked missing",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-14 Missing/malformed optional fields: no errors, nothing invented, unavailable fields stated or omitted",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-15 No application URL: Apply Now is aria-disabled with a visible reason, no review, no navigation, no fake link",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-16 DEMO listing that carries an applyUrl still never exposes or opens it",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-17 Valid official URL: review step shows title, company, domain, leaving-NEXORA notice, Continue and Cancel; no form fields; Cancel returns",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-18 UNVERIFIED listings: caution shown before redirect, never described as verified; http and past-deadline warnings",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-19 Unsafe URLs rejected (javascript:, data:, ftp:, //host, embedded credentials, malformed); DEMO never redirects",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-20 Continue opens the exact URL in a new tab with no opener; records only EXTERNAL_REDIRECT_OPENED (never Submitted); nothing persisted; no 'applied' claim",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-21 A double click on Continue opens one tab and records one redirect",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-22 Demo, no-URL and cancelled flows create no application record",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-23 Injected HTML in title, company, skills and description is shown as plain text, never executed",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-24 No JavaScript errors during injected-data flows",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-25 Dialog fits 320-1280 px: no horizontal overflow, inside viewport, tap targets >= 40px (details, review, demo views)",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-26 Emulated touch phone: tap View details, Save, Apply, Cancel, Close",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-27 applications.js: refuses nexora/demo/invalid records, unique ids, redirect never 'Submitted', in-memory store",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-28 paragraphs() splits long text safely and tolerates bad input",
+  "status": "PASS",
+  "detail": ""
+ },
+ {
+  "name": "S13-29 applications.js ships with the project",
+  "status": "PASS",
+  "detail": ""
+ }
+]
